@@ -10,10 +10,15 @@
   const currencyFmt = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
   const priceFmt = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
 
+  // Referência Inmetro (ciclo cidade) para o Onix LT 1.0 2023
+  const FUEL_LABEL = { gasolina: 'Gasolina', etanol: 'Etanol' };
+  const FUEL_REF_CITY = { gasolina: 13.3, etanol: 9.9 };
+
   // ---------- Elements ----------
   const entryForm = document.getElementById('entryForm');
   const entryIdInput = document.getElementById('entryId');
   const dateInput = document.getElementById('date');
+  const fuelInput = document.getElementById('fuel');
   const priceInput = document.getElementById('price');
   const litersInput = document.getElementById('liters');
   const kmInput = document.getElementById('km');
@@ -27,6 +32,8 @@
   const statKm = document.getElementById('statKm');
   const statConsumption = document.getElementById('statConsumption');
   const statAvgPrice = document.getElementById('statAvgPrice');
+  const statVsReference = document.getElementById('statVsReference');
+  const statVsReferenceBadge = document.getElementById('statVsReferenceBadge');
 
   const entriesTableBody = document.getElementById('entriesTableBody');
   const emptyState = document.getElementById('emptyState');
@@ -92,18 +99,29 @@
     return e.km > 0 ? e.km / e.liters : null;
   }
 
+  function entryFuel(e) {
+    return e.fuel === 'etanol' ? 'etanol' : 'gasolina';
+  }
+
   function groupByMonth() {
     const map = new Map();
     for (const e of entries) {
       const key = monthKeyOf(e.date);
-      if (!map.has(key)) map.set(key, { liters: 0, spend: 0, km: 0, count: 0 });
+      if (!map.has(key)) map.set(key, { liters: 0, spend: 0, km: 0, count: 0, litersByFuel: { gasolina: 0, etanol: 0 } });
       const agg = map.get(key);
       agg.liters += e.liters;
       agg.spend += entryTotal(e);
       agg.km += e.km || 0;
       agg.count += 1;
+      agg.litersByFuel[entryFuel(e)] += e.liters;
     }
     return map;
+  }
+
+  function referenceConsumption(litersByFuel) {
+    const total = litersByFuel.gasolina + litersByFuel.etanol;
+    if (total <= 0) return null;
+    return (litersByFuel.gasolina * FUEL_REF_CITY.gasolina + litersByFuel.etanol * FUEL_REF_CITY.etanol) / total;
   }
 
   function uid() {
@@ -122,6 +140,7 @@
       const cons = entryConsumption(e);
       const cells = [
         formatDate(e.date),
+        FUEL_LABEL[entryFuel(e)],
         `${priceFmt.format(e.price)}`,
         `${num(e.liters, 2)} L`,
         e.km ? `${num(e.km, 1)} km` : '—',
@@ -179,12 +198,31 @@
   }
 
   function renderStats() {
-    const agg = groupByMonth().get(selectedMonth) || { liters: 0, spend: 0, km: 0, count: 0 };
+    const agg = groupByMonth().get(selectedMonth) || { liters: 0, spend: 0, km: 0, count: 0, litersByFuel: { gasolina: 0, etanol: 0 } };
     statSpend.textContent = currencyFmt.format(agg.spend);
     statLiters.textContent = `${num(agg.liters, 2)} L`;
     statKm.textContent = `${num(agg.km, 1)} km`;
-    statConsumption.textContent = agg.liters > 0 && agg.km > 0 ? `${num(agg.km / agg.liters, 2)} km/L` : '—';
+    const actualConsumption = agg.liters > 0 && agg.km > 0 ? agg.km / agg.liters : null;
+    statConsumption.textContent = actualConsumption !== null ? `${num(actualConsumption, 2)} km/L` : '—';
     statAvgPrice.textContent = agg.liters > 0 ? `${currencyFmt.format(agg.spend / agg.liters)}/L` : '—';
+
+    const ref = referenceConsumption(agg.litersByFuel);
+    if (actualConsumption !== null && ref) {
+      const ratio = actualConsumption / ref;
+      const diffPct = (ratio - 1) * 100;
+      const sign = diffPct >= 0 ? '+' : '';
+      statVsReference.textContent = `${sign}${num(diffPct, 0)}%`;
+      statVsReferenceBadge.hidden = false;
+      let status, label;
+      if (ratio >= 0.95) { status = 'good'; label = 'Dentro do esperado'; }
+      else if (ratio >= 0.8) { status = 'warning'; label = 'Abaixo do esperado'; }
+      else { status = 'critical'; label = 'Muito abaixo do esperado'; }
+      statVsReferenceBadge.className = `status-badge status-${status}`;
+      statVsReferenceBadge.textContent = label;
+    } else {
+      statVsReference.textContent = '—';
+      statVsReferenceBadge.hidden = true;
+    }
   }
 
   // ---------- Rendering: monthly report table ----------
@@ -405,6 +443,7 @@
     if (!e) return;
     entryIdInput.value = e.id;
     dateInput.value = e.date;
+    fuelInput.value = entryFuel(e);
     priceInput.value = e.price;
     litersInput.value = e.liters;
     kmInput.value = e.km || '';
@@ -424,6 +463,7 @@
     evt.preventDefault();
 
     const date = dateInput.value;
+    const fuel = fuelInput.value === 'etanol' ? 'etanol' : 'gasolina';
     const price = parseFloat(priceInput.value);
     const liters = parseFloat(litersInput.value);
     const km = kmInput.value ? parseFloat(kmInput.value) : 0;
@@ -437,12 +477,13 @@
       const existing = entries.find((x) => x.id === id);
       if (existing) {
         existing.date = date;
+        existing.fuel = fuel;
         existing.price = price;
         existing.liters = liters;
         existing.km = km;
       }
     } else {
-      entries.push({ id: uid(), date, price, liters, km });
+      entries.push({ id: uid(), date, fuel, price, liters, km });
     }
 
     persist();

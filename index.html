@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Controle de Gasolina</title>
+<title>Controle de Gasolina · Onix LT 1.0</title>
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -12,12 +12,35 @@
   <header class="topbar">
     <div class="topbar-title">
       <h1>Controle de Gasolina</h1>
-      <p class="subtitle">Registre seus abastecimentos e acompanhe o relatório mensal</p>
+      <p class="subtitle">Chevrolet Onix LT 1.0 2023 · Registre seus abastecimentos e acompanhe o relatório mensal</p>
     </div>
     <button id="themeToggle" class="btn-ghost" type="button" aria-label="Alternar tema">🌙</button>
   </header>
 
   <main>
+
+    <section class="card car-card" aria-labelledby="car-title">
+      <h2 id="car-title">Meu carro</h2>
+      <div class="car-grid">
+        <div class="car-field">
+          <span class="stat-label">Modelo</span>
+          <span class="car-value">Chevrolet Onix LT 1.0 2023</span>
+        </div>
+        <div class="car-field">
+          <span class="stat-label">Motor</span>
+          <span class="car-value">1.0 aspirado · flex (gasolina/etanol)</span>
+        </div>
+        <div class="car-field">
+          <span class="stat-label">Tanque</span>
+          <span class="car-value">44 L</span>
+        </div>
+        <div class="car-field">
+          <span class="stat-label">Consumo de referência (Inmetro, ciclo cidade)</span>
+          <span class="car-value">Gasolina 13,3 km/L · Etanol 9,9 km/L</span>
+        </div>
+      </div>
+      <p class="car-note">Valores de fábrica, medidos em ciclo controlado — servem como referência para comparar com o seu consumo real, que varia conforme trânsito e estilo de condução.</p>
+    </section>
 
     <section class="card" aria-labelledby="form-title">
       <h2 id="form-title">Novo abastecimento</h2>
@@ -27,6 +50,14 @@
         <div class="field">
           <label for="date">Data</label>
           <input type="date" id="date" required>
+        </div>
+
+        <div class="field">
+          <label for="fuel">Combustível</label>
+          <select id="fuel">
+            <option value="gasolina">Gasolina</option>
+            <option value="etanol">Etanol</option>
+          </select>
         </div>
 
         <div class="field">
@@ -76,6 +107,11 @@
         <span class="stat-label">Preço médio</span>
         <span class="stat-value" id="statAvgPrice">R$ 0,00/L</span>
       </div>
+      <div class="stat-tile">
+        <span class="stat-label">Vs. referência de fábrica</span>
+        <span class="stat-value" id="statVsReference">—</span>
+        <span class="status-badge" id="statVsReferenceBadge" hidden></span>
+      </div>
     </section>
 
     <section class="card charts-card" id="chartsCard" hidden>
@@ -122,6 +158,7 @@
           <thead>
             <tr>
               <th>Data</th>
+              <th>Combustível</th>
               <th>Preço/L</th>
               <th>Litros</th>
               <th>Km rodados</th>
