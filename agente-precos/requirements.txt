@@ -1,0 +1,5 @@
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+# opcional (renderização com Chromium para páginas que só mostram o preço via JavaScript):
+# playwright>=1.40

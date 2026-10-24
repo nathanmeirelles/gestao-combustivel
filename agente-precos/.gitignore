@@ -1,0 +1,5 @@
+# Dados de execução: histórico de buscas, CEP e cache de páginas ficam só na máquina local
+data/
+.env
+__pycache__/
+*.pyc
