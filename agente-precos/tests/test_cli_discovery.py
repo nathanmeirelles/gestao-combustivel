@@ -1,3 +1,4 @@
+import argparse
 import contextlib
 import io
 import logging
@@ -51,7 +52,7 @@ class ValorCliTest(unittest.TestCase):
         self.assertEqual(cli.valor_cli("4299,90"), D("4299.90"))
         self.assertEqual(cli.valor_cli("R$ 1.234,56"), D("1234.56"))
         self.assertEqual(cli.valor_cli("4299.5"), D("4299.5"))
-        with self.assertRaises(Exception):
+        with self.assertRaises(argparse.ArgumentTypeError):
             cli.valor_cli("abc")
 
 
@@ -122,7 +123,7 @@ class CliFluxoTest(CliBase):
 
     def test_consulta_inexistente(self):
         with self.assertRaises(SystemExit):
-            rodar_sem_captura = cli.main(["comparar", "-c", "99"])
+            cli.main(["comparar", "-c", "99"])
 
     def test_descobrir_sem_chave_explica_o_que_fazer(self):
         rodar("nova", "x")

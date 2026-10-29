@@ -26,6 +26,12 @@ CREATE TABLE IF NOT EXISTS monitores (
 """
 
 
+def _novo_id(cur: sqlite3.Cursor) -> int:
+    if cur.lastrowid is None:
+        raise RuntimeError("o banco não devolveu o id do registro inserido")
+    return cur.lastrowid
+
+
 class Store:
     def __init__(self, caminho: Path | str):
         self.caminho = Path(caminho)
@@ -54,7 +60,7 @@ class Store:
         c.criada_em = c.criada_em or agora_brt()
         with self._tx():
             cur = self.db.execute("INSERT INTO consultas(criada_em, payload) VALUES (?, ?)", (c.criada_em.isoformat(), json.dumps(c.to_dict(), ensure_ascii=False)))
-        c.id = cur.lastrowid
+        c.id = _novo_id(cur)
         return c.id
 
     def consulta(self, cid: int) -> Consulta | None:
@@ -78,7 +84,7 @@ class Store:
                 "INSERT INTO ofertas(consulta_id, url, url_norm, dominio, status, coletado_em, payload) VALUES (?,?,?,?,?,?,?)",
                 (o.consulta_id, o.url, normalizar_url(o.url), o.dominio, o.status.value, o.coletado_em.isoformat(), json.dumps(o.to_dict(), ensure_ascii=False)),
             )
-        o.id = cur.lastrowid
+        o.id = _novo_id(cur)
         return o.id
 
     def _oferta(self, r: sqlite3.Row) -> Oferta:
@@ -130,7 +136,7 @@ class Store:
     def novo_monitor(self, consulta_id: int, cfg: dict) -> int:
         with self._tx():
             cur = self.db.execute("INSERT INTO monitores(consulta_id, criado_em, payload) VALUES (?,?,?)", (consulta_id, agora_brt().isoformat(), json.dumps(cfg, ensure_ascii=False)))
-        return cur.lastrowid
+        return _novo_id(cur)
 
     def monitores(self, so_ativos: bool = True) -> list[dict]:
         q = "SELECT * FROM monitores" + (" WHERE ativo = 1" if so_ativos else "") + " ORDER BY id"

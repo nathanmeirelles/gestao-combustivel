@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
 from urllib.parse import urlsplit
 
 from .models import Evidencia, Oferta, Status
 from .pipeline import Comparacao
 from .pricing import economia
-from .scoring import Pontuacao
+from .scoring import Pontuacao, custo_de
 from .util import fmt_brl, fmt_dt
 
 _TAG = {
@@ -25,6 +24,10 @@ _STATUS = {"nao_confirmada": "não confirmada", "bloqueada": "bloqueada para lei
 
 def _eh_global(s: str) -> bool:
     return s.startswith("[INFO] dispersão")
+
+
+def _meio_txt(meio: str | None) -> str:
+    return "meio de pagamento não especificado" if not meio or meio == "não especificado" else meio
 
 
 def tag(ev: Evidencia) -> str:
@@ -135,11 +138,11 @@ def relatorio(comp: Comparacao, topo: int = 5) -> str:
         else:
             add(f"**Melhor compra: {nome(o)}** — {o.titulo or c.texto}")
         if c.pagamento != "parcelado" and vista:
-            cv = vista.custo
+            cv = custo_de(vista)
             add(f"- **À vista:** {fmt_brl(cv.produto)} — {cv.rotulo}; {tag(cv.evidencia)}"
                 f" · custo total {fmt_brl(cv.total)}{'' if cv.frete_incluido else ' **sem frete** (não calculado)'}")
         if c.pagamento != "vista" and parc:
-            cp = parc.custo
+            cp = custo_de(parc)
             j = "sem juros" if cp.sem_juros else f"**com juros**: +{fmt_brl(cp.juros_total)} (~{cp.taxa_am}% a.m.)"
             add(f"- **Parcelado:** {cp.n}x de {fmt_brl(cp.valor_parcela)} = {fmt_brl(cp.produto)}, {j} — {tag(cp.evidencia)} "
                 f"(loja: {nome(parc.oferta)})")
@@ -192,23 +195,25 @@ def relatorio(comp: Comparacao, topo: int = 5) -> str:
     # ---------------- D. pagamento
     add("## D. Comparação de pagamento")
     if vista:
-        add(f"- **À vista — melhor:** {nome(vista.oferta)}: {fmt_brl(vista.custo.produto)} — {vista.custo.rotulo}; total {fmt_brl(vista.custo.total)}.")
-        if vista.oferta.preco_pix and (vista.oferta.preco_cartao_vista or vista.oferta.preco_exibido):
-            base = vista.oferta.preco_cartao_vista or vista.oferta.preco_exibido
+        cvv = custo_de(vista)
+        add(f"- **À vista — melhor:** {nome(vista.oferta)}: {fmt_brl(cvv.produto)} — {cvv.rotulo}; total {fmt_brl(cvv.total)}.")
+        base = vista.oferta.preco_cartao_vista or vista.oferta.preco_exibido
+        if vista.oferta.preco_pix and base:
             nom, pct = economia(base, vista.oferta.preco_pix)
-            add(f"  - O preço à vista com desconto ({vista.oferta.meio_vista or 'meio não especificado'}) economiza {fmt_brl(nom)} ({pct}%) sobre o cartão nesta loja — lido do texto da página ({tag(vista.oferta.evid('preco_pix'))}); confirme no checkout.")
+            add(f"  - O preço à vista com desconto ({_meio_txt(vista.oferta.meio_vista)}) economiza {fmt_brl(nom)} ({pct}%) sobre o cartão nesta loja — lido do texto da página ({tag(vista.oferta.evid('preco_pix'))}); confirme no checkout.")
     else:
         add("- **À vista:** nenhuma oferta elegível com preço à vista.")
     if parc:
-        cp = parc.custo
+        cp = custo_de(parc)
         add(f"- **Parcelado — melhor:** {nome(parc.oferta)}: {cp.n}x de {fmt_brl(cp.valor_parcela)} = {fmt_brl(cp.produto)} "
             f"({'sem juros' if cp.sem_juros else 'COM juros: +' + fmt_brl(cp.juros_total)}).")
-        if vista and vista.custo:
-            nom, pct = economia(cp.produto, vista.custo.produto)
+        if vista:
+            nom, pct = economia(cp.produto, custo_de(vista).produto)
             add(f"  - Pagar à vista na melhor oferta custa {fmt_brl(nom)} ({pct}%) a menos que parcelar nesta.")
         com_juros = [p for p in comp.ranking.get("parcelado", []) if p.elegivel and p.custo and not p.custo.sem_juros]
         for p in com_juros[:3]:
-            add(f"  - ⚠ {nome(p.oferta)}: parcelamento com juros embutidos de {fmt_brl(p.custo.juros_total)} (~{p.custo.taxa_am}% a.m.); não confunda parcela menor com melhor negócio.")
+            cj = custo_de(p)
+            add(f"  - ⚠ {nome(p.oferta)}: parcelamento com juros embutidos de {fmt_brl(cj.juros_total)} (~{cj.taxa_am}% a.m.); não confunda parcela menor com melhor negócio.")
     else:
         add("- **Parcelado:** nenhuma oferta elegível com parcelamento legível.")
     add("- **Cupons e cashback:** não verificados nesta pesquisa; nenhum foi somado a qualquer total.")
@@ -240,12 +245,12 @@ def relatorio(comp: Comparacao, topo: int = 5) -> str:
     else:
         partes = [("Minha recomendação, condicional, é comprar na" if len(_dominios_elegiveis(comp)) < 2 else "Minha recomendação é comprar na") + f" **{nome(principal.oferta)}**"]
         if vista and c.pagamento != "parcelado":
-            partes.append(f"por {fmt_brl(vista.custo.produto)} ({vista.custo.rotulo}).")
+            partes.append(f"por {fmt_brl(custo_de(vista).produto)} ({custo_de(vista).rotulo}).")
         add(" ".join(partes) + f" Confiança da pesquisa: {nivel}.")
         if principal.confiab.cobertura < 0.4:
             add("Atenção: a loja não pôde ser verificada o bastante; trate esta recomendação como *condicional* à sua conferência de CNPJ, reputação e política de troca.")
         if parc and c.pagamento != "vista":
-            cp = parc.custo
+            cp = custo_de(parc)
             add(f"Se preferir parcelar, a melhor condição verificada é {nome(parc.oferta)}: {cp.n}x de {fmt_brl(cp.valor_parcela)} (total {fmt_brl(cp.produto)}, {'sem juros' if cp.sem_juros else 'com juros'}).")
         add("**Antes de pagar:** abra o link, confira vendedor, estoque, frete para o seu CEP e as condições de pagamento no carrinho. Nenhuma compra foi feita.")
     add("")

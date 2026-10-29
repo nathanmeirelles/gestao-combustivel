@@ -107,7 +107,7 @@ class Oferta:
         return out
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "Oferta":
+    def from_dict(cls, d: dict[str, Any]) -> Oferta:
         d = dict(d)
         d["status"] = Status(d["status"])
         d["coletado_em"] = datetime.fromisoformat(d["coletado_em"])
@@ -119,6 +119,11 @@ class Oferta:
         ]
         validos = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in d.items() if k in validos})
+
+    @property
+    def preco_ref(self) -> Decimal | None:
+        """Preço comparável entre lojas: o de lista/cartão quando conhecido, senão o declarado na página."""
+        return self.preco_cartao_vista or self.preco_exibido
 
     def evid(self, campo: str) -> Evidencia:
         return Evidencia(self.evidencias.get(campo, Evidencia.NAO_VERIFICADO.value))
@@ -154,7 +159,7 @@ class Consulta:
         return d
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "Consulta":
+    def from_dict(cls, d: dict[str, Any]) -> Consulta:
         d = dict(d)
         if d.get("criada_em"):
             d["criada_em"] = datetime.fromisoformat(d["criada_em"])

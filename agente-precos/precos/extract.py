@@ -6,12 +6,11 @@ import json
 import re
 from dataclasses import dataclass, field
 from decimal import Decimal
-from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
 
 from .models import Parcelamento
-from .util import achar_cnpjs, D, dominio, fmt_brl, gtin_valido, normalizar_url, parse_brl_texto, parse_decimal_maquina
+from .util import achar_cnpjs, dominio, gtin_valido, normalizar_url, parse_brl_texto, parse_decimal_maquina
 
 _IGNORAR_CHAVES = {"isrelatedto", "issimilarto", "isaccessoryorsparepartfor", "isconsumablefor", "review", "aggregaterating"}
 _DISP = {
@@ -23,10 +22,19 @@ _DISP = {
 _COND = {"newcondition": "novo", "usedcondition": "usado", "refurbishedcondition": "recondicionado", "damagedcondition": "danificado"}
 
 _RE_PARC = re.compile(r"(\d{1,2})\s*[xX]\s*(?:de\s*)?R\$\s*([\d\.]+,\d{2})(?=(?P<resto>.{0,45}))", re.I)
-_RE_PIX_A = re.compile(r"R\$\s*([\d\.]+,\d{2})\s*[\(\-–]?\s*(?:à vista\s+)?(?:no|via|com|pelo|no\s+pagamento\s+via)?\s*pix", re.I)
+_RE_PIX_A = re.compile(r"R\$\s*([\d\.]+,\d{2})\s*[\(\-–]?\s*(?:\d{1,2}\s*%\s*(?:off|de desconto)?\s*\)?\s*)?(?:(?:à|a)\s+vista\s+)?(?:(?:com|de)\s+desconto\s+)?(?:(?:no|via|com|pelo|no\s+pagamento\s+via)\s+)?pix", re.I)
+# "sem juros" escrito de várias formas; qualquer outra menção a juros = cobrança de juros
+_RE_SEM_JUROS = re.compile(r"\b(?:sem|s\s*/)\s*juros?\b|sem\s+acr[eé]scimos?|juros\s*0\s*%|0\s*%\s*(?:de\s*)?juros", re.I)
+_RE_COM_JUROS = re.compile(r"\b(?:com|c\s*/)\s*juros?\b|\bjuros\b", re.I)
 _RE_PIX_B = re.compile(r"pix[^R\d]{0,25}R\$\s*([\d\.]+,\d{2})", re.I)
 _RE_AVISTA_A = re.compile(r"R\$\s*([\d\.]+,\d{2})\s*[\(\-–:]?\s*(?:à|a)\s+vista", re.I)
 _RE_AVISTA_B = re.compile(r"(?:à|a)\s+vista[^R\d]{0,20}R\$\s*([\d\.]+,\d{2})", re.I)
+_RE_LISTA_PARC = re.compile(r"R\$\s*([\d\.]+,\d{2})\s*(?:em\s+|at[eé]\s+|ou\s+)*(\d{1,2})\s*[xX]\s*(?:de\s*)?R\$\s*([\d\.]+,\d{2})", re.I)
+# valor sujeito a condição de quantidade/revenda não é o preço de varejo do item. Só contam sinais de CONDIÇÃO: a palavra "atacado"
+# sozinha aparece em abas ("VAREJO | ATACADO") e "kit"/"combo" podem ser o próprio item vendido.
+_RE_EXCLUI_ANTES = re.compile(r"revendedor|revenda", re.I)
+_RE_EXCLUI_DEPOIS = re.compile(r"m[ií]nimo|unidades|a partir de \d", re.I)
+_JANELA = 400      # caracteres antes/depois do preço principal onde Pix e parcelas são aceitos
 _RE_GARANTIA = re.compile(r"garantia[^.\n]{0,60}?(\d{1,2})\s*(meses|mês|anos|ano|dias)|garantia\s+(?:do\s+fabricante|nacional|de\s+fábrica)", re.I)
 
 
@@ -46,6 +54,7 @@ class Extracao:
     disponibilidade: str | None = None
     preco_pix: Decimal | None = None
     meio_vista: str | None = None
+    preco_lista: Decimal | None = None      # preço de lista/cartão quando o preço estruturado é, na verdade, o do Pix
     titulos: list[str] = field(default_factory=list)
     parcelamentos: list[Parcelamento] = field(default_factory=list)
     cnpjs: list[str] = field(default_factory=list)
@@ -109,6 +118,103 @@ def _chave_final(v: str | None) -> str:
     return (v or "").split("/")[-1].lower()
 
 
+def _ancora(texto: str, preco: Decimal) -> int | None:
+    """Posição da 1ª ocorrência do preço no texto visível (preferindo 'R$ 1.234,50'); None se não aparece."""
+    inteiro, _, cent = f"{preco:.2f}".partition(".")
+    milhar = f"{int(inteiro):,}".replace(",", ".")
+    com_centavos = sorted({f"{milhar},{cent}", f"{inteiro},{cent}"}, key=len, reverse=True)
+    inteiras = sorted({milhar, inteiro}, key=len, reverse=True) if cent == "00" else []
+    regs = [rf"R\$\s*{re.escape(f)}(?!\d)" for f in com_centavos] + [rf"R\$\s*{re.escape(f)}(?!\d|,\d)" for f in inteiras]
+    regs += [rf"(?<![\d.,]){re.escape(f)}(?!\d)" for f in com_centavos] + [rf"(?<![\d.,]){re.escape(f)}(?!\d|,\d)" for f in inteiras]
+    for reg in regs[: len(regs) // 2]:                  # 1º as formas com R$
+        achados = [m.start() for m in re.finditer(reg, texto)]
+        if achados:
+            return min(achados)
+    posicoes = [m.start() for reg in regs[len(regs) // 2:] for m in re.finditer(reg, texto)]
+    return min(posicoes) if posicoes else None
+
+
+def _perto_de_exclusao(texto: str, pos: int, fim: int) -> bool:
+    return bool(_RE_EXCLUI_ANTES.search(texto[max(0, pos - 110): pos]) or _RE_EXCLUI_DEPOIS.search(texto[fim: fim + 130]))
+
+
+def _condicoes_de_pagamento(ex: Extracao, texto: str, ancora: int) -> None:
+    """Pix/à vista e parcelas do ITEM PRINCIPAL: só aceita o que está colado ao preço principal.
+
+    Páginas de loja trazem grades de produtos relacionados (cada um com seu 'R$ X no Pix') e blocos de atacado; ler a página
+    inteira e pegar o menor valor atribuiria ao produto o preço de outro. Por isso: janela ao redor da âncora, exclusão de
+    contexto de atacado/revenda/kit e escolha do candidato MAIS PRÓXIMO (não do menor).
+    """
+    assert ex.preco is not None
+    preco = ex.preco
+    ini, fim = max(0, ancora - _JANELA), min(len(texto), ancora + _JANELA)
+    trecho = texto[ini:fim]
+
+    # --- Pix / à vista
+    cands: list[tuple[int, Decimal, bool, str]] = []
+    for rx, eh_pix in ((_RE_PIX_A, True), (_RE_PIX_B, True), (_RE_AVISTA_A, False), (_RE_AVISTA_B, False)):
+        for m in rx.finditer(trecho):
+            pos = ini + m.start()
+            valor = parse_brl_texto(m.group(1))
+            if valor is None or not (preco * Decimal("0.5") <= valor <= preco) or _perto_de_exclusao(texto, pos, ini + m.end()):
+                continue
+            janela = texto[max(0, pos - 45): ini + m.end() + 45].lower()
+            meio = "pix" if "pix" in janela else "boleto" if "boleto" in janela else "cartão" if re.search(r"cart[aã]o|cr[eé]dito", janela) else "não especificado"
+            cands.append((abs(pos - ancora), valor, eh_pix, meio))
+
+    if any(eh_pix and valor == preco for _, valor, eh_pix, _ in cands):
+        # o preço dos dados estruturados JÁ É o do Pix ("R$ 325,00 em 6x ... ou R$ 292,50 via Pix"): procurar o preço de lista
+        ex.preco_pix, ex.meio_vista = preco, "pix"
+        listas = []
+        for m in _RE_LISTA_PARC.finditer(trecho):
+            pos = ini + m.start()
+            lista, n, v = parse_brl_texto(m.group(1)), int(m.group(2)), parse_brl_texto(m.group(3))
+            if lista is None or v is None or _perto_de_exclusao(texto, pos, ini + m.end()) or not (preco < lista <= preco * Decimal("1.6")):
+                continue
+            if abs(n * v - lista) <= max(Decimal("0.50"), lista * Decimal("0.005")):      # parcelas sem juros que somam o preço de lista
+                listas.append((abs(pos - ancora), lista))
+        if listas:
+            ex.preco_lista = min(listas)[1]
+        ex.avisos.append("o preço dos dados estruturados coincide com o valor do Pix da página" + ("" if ex.preco_lista else "; preço de lista/cartão não identificado"))
+    else:
+        descontos = sorted((dist, valor, meio) for dist, valor, _, meio in cands if valor < preco)
+        if descontos:
+            _, ex.preco_pix, ex.meio_vista = descontos[0]
+
+    # --- parcelas: coleta bruta ao redor da âncora
+    brutas: list[tuple[int, int, Decimal, bool | None]] = []          # (distância, n, valor, sem_juros)
+    for m in _RE_PARC.finditer(trecho):
+        pos = ini + m.start()
+        n, valor = int(m.group(1)), parse_brl_texto(m.group(2))
+        if not valor or n < 2 or n > 24 or _perto_de_exclusao(texto, pos, ini + m.end()):
+            continue
+        resto = m.group("resto")
+        sem = True if _RE_SEM_JUROS.search(resto) else False if _RE_COM_JUROS.search(resto) else None
+        brutas.append((abs(pos - ancora), n, valor, sem))
+
+    # preço estruturado = Pix e a página não mostra o valor de lista: parcelas SEM JUROS somam, por definição, o preço de lista
+    if ex.meio_vista == "pix" and ex.preco_pix == preco and ex.preco_lista is None:
+        derivados = [(d, n * v) for d, n, v, sem in brutas if sem is True and preco < n * v <= preco * Decimal("1.25")]
+        if derivados:
+            ex.preco_lista = min(derivados)[1]
+            ex.avisos.append("preço de lista/cartão derivado das parcelas sem juros (n × parcela)")
+
+    # --- parcelas plausíveis para ESTE item (em relação ao preço de lista, se houver)
+    base = ex.preco_lista or preco
+    achados: dict[int, tuple[int, Parcelamento]] = {}
+    for dist, n, valor, sem in brutas:
+        total = valor * n
+        if sem is True:      # sem juros: as parcelas têm de FECHAR com o preço de lista (±1%); senão é parcelamento de outro item
+            if abs(total - base) > max(Decimal("1.00"), base * Decimal("0.01")):
+                continue
+        elif not (base * Decimal("0.99") <= total <= base * Decimal("1.6")):
+            continue         # com juros/indefinido: só pode custar mais que o preço de lista, e não absurdamente mais
+        ant = achados.get(n)
+        if ant is None or dist < ant[0] or (ant[1].sem_juros is None and sem is not None and dist <= ant[0] + 80):
+            achados[n] = (dist, Parcelamento(n, valor, sem))
+    ex.parcelamentos = sorted((p for _, p in achados.values()), key=lambda p: p.n)
+
+
 def extrair(html: str, url: str) -> Extracao:
     ex = Extracao()
     soup = BeautifulSoup(html, "lxml")
@@ -127,6 +233,9 @@ def extrair(html: str, url: str) -> Extracao:
             except ValueError:
                 ex.avisos.append("um bloco JSON-LD da página está malformado e foi ignorado")
     produtos = [n for n in nos if _tipos(n) & {"product", "productgroup"}]
+    # as variantes aninhadas em `hasVariant` pertencem ao grupo (não são fichas distintas, senão toda página com variações viraria "listagem")
+    variantes_dos_grupos = {id(var) for pr in produtos if "productgroup" in _tipos(pr) for var in (pr.get("hasVariant") or []) if isinstance(var, dict)}
+    produtos = [pr for pr in produtos if id(pr) not in variantes_dos_grupos]
     vistos, unicos = set(), []
     for pr in produtos:                     # deduplica o mesmo produto repetido no grafo
         chave = (pr.get("sku"), pr.get("name"), json.dumps(pr.get("offers"), sort_keys=True, default=str))
@@ -148,9 +257,13 @@ def extrair(html: str, url: str) -> Extracao:
             ex.avisos.append(f"{len(unicos)} produtos distintos no JSON-LD (provável página de listagem): preço não atribuído a nenhum")
     if produto is not None and "productgroup" in _tipos(produto):
         ex.avisos.append("página de grupo de variações: o preço pode depender da variação escolhida")
-        variantes = [v for v in (produto.get("hasVariant") or []) if isinstance(v, dict)]
-        if len(variantes) == 1:
-            produto = {**produto, **variantes[0]}
+        variantes = [var for var in (produto.get("hasVariant") or []) if isinstance(var, dict)]
+        ofertas_grupo = list(_ofertas(produto))
+        for var in variantes:
+            ofertas_grupo += _ofertas(var)                   # a escolha entre ofertas (e o aviso de preços diferentes) é feita adiante
+        produto = {**produto, "offers": ofertas_grupo}
+        if len(variantes) == 1:                              # um único item: seus dados descrevem o produto
+            produto = {**variantes[0], **{chave: valor for chave, valor in produto.items() if chave not in variantes[0] or chave == "offers"}}
 
     if produto is not None:
         ex.titulo = _nome(produto)
@@ -208,37 +321,17 @@ def extrair(html: str, url: str) -> Extracao:
     for t in soup(["script", "style", "noscript", "template"]):
         t.decompose()
     texto = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))[:600_000]
+    texto = re.sub(r"(R\$\s*[\d.]+)\s*,\s*(\d{2})\b", r"\1,\2", texto)       # algumas plataformas escrevem "R$ 220 , 41"
     ex.cnpjs = achar_cnpjs(texto)
 
     if ex.preco is not None:
-        formas = {f"{ex.preco:.2f}".replace(".", ","), fmt_brl(ex.preco).replace("R$ ", "")}
-        if ex.preco == ex.preco.to_integral_value():
-            formas.add(f"{int(ex.preco):,}".replace(",", "."))
-        ex.preco_corroborado = any(f in texto for f in formas)
-        if not ex.preco_corroborado:
-            ex.avisos.append("o preço dos dados estruturados não aparece no texto visível da página (pode ser renderizado por JavaScript ou estar divergente)")
-
-        for rx in (_RE_PIX_A, _RE_PIX_B, _RE_AVISTA_A, _RE_AVISTA_B):
-            for m in rx.finditer(texto):
-                v = parse_brl_texto(m.group(1))
-                if v and ex.preco * Decimal("0.5") <= v < ex.preco and (ex.preco_pix is None or v < ex.preco_pix):
-                    ex.preco_pix = v
-                    janela = texto[max(0, m.start() - 45): m.end() + 45].lower()
-                    ex.meio_vista = "pix" if "pix" in janela else "boleto" if "boleto" in janela else "cartão" if re.search(r"cart[aã]o|cr[eé]dito", janela) else "não especificado"
-        achados: dict[int, Parcelamento] = {}
-        for m in _RE_PARC.finditer(texto):
-            n, valor = int(m.group(1)), parse_brl_texto(m.group(2))
-            if not valor or n < 2 or n > 24:
-                continue
-            total = valor * n
-            if not (ex.preco * Decimal("0.97") <= total <= ex.preco * Decimal("2.0")):
-                continue  # não parece ser o parcelamento DESTE produto
-            resto = m.group("resto").lower()
-            sem = True if "sem juros" in resto else False if "juros" in resto else None
-            ant = achados.get(n)
-            if ant is None or (ant.sem_juros is None and sem is not None):
-                achados[n] = Parcelamento(n, valor, sem)
-        ex.parcelamentos = sorted(achados.values(), key=lambda p: p.n)
+        ancora = _ancora(texto, ex.preco)
+        ex.preco_corroborado = ancora is not None
+        if ancora is None:
+            ex.avisos.append("o preço dos dados estruturados não aparece no texto visível da página (pode ser renderizado por JavaScript ou estar divergente); "
+                             "Pix e parcelas do texto NÃO foram atribuídos a este item")
+        else:
+            _condicoes_de_pagamento(ex, texto, ancora)
         if ex.preco_pix or ex.parcelamentos:
             ex.avisos.append("Pix/parcelamento lidos do texto da página por heurística: confirme no checkout")
     gm = _RE_GARANTIA.search(texto)

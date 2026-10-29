@@ -45,11 +45,11 @@ def serie_do_produto(store: Store, c: Consulta) -> Serie:
     pts = []
     for cid, o in store.todas_verificadas():
         outra = store.consulta(cid)
-        if outra is None or chave_produto(outra) != chave or o.identidade_produto == "divergente" or o.preco_exibido is None:
+        if outra is None or chave_produto(outra) != chave or o.identidade_produto == "divergente" or o.preco_ref is None:
             continue
         if outra.condicao != c.condicao:
             continue
-        pts.append((o.coletado_em, o.dominio, o.preco_exibido))
+        pts.append((o.coletado_em, o.dominio, o.preco_ref))
     return Serie(sorted(pts, key=lambda p: p[0]))
 
 

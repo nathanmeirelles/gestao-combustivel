@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+BRT: tzinfo
 try:
     from zoneinfo import ZoneInfo
 
@@ -44,8 +45,8 @@ def D(valor) -> Decimal | None:
         return None
 
 
-def money(valor: Decimal | None) -> Decimal | None:
-    return None if valor is None else valor.quantize(CENT, rounding=ROUND_HALF_UP)
+def money(valor: Decimal) -> Decimal:
+    return valor.quantize(CENT, rounding=ROUND_HALF_UP)
 
 
 def parse_decimal_maquina(texto) -> Decimal | None:
@@ -98,7 +99,7 @@ def fmt_brl(valor: Decimal | None) -> str:
     inteiro, _, cent = f"{v:.2f}".partition(".")
     sinal = "-" if inteiro.startswith("-") else ""
     inteiro = inteiro.lstrip("-")
-    grupos = []
+    grupos: list[str] = []
     while len(inteiro) > 3:
         grupos.insert(0, inteiro[-3:])
         inteiro = inteiro[:-3]

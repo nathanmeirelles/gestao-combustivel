@@ -6,6 +6,7 @@ O `urllib.robotparser` da biblioteca padrão NÃO entende curingas e liberaria p
 
 from __future__ import annotations
 
+import contextlib
 import re
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
@@ -69,10 +70,8 @@ class Robots:
                     continue  # "Disallow:" vazio = tudo liberado
                 atual.regras.append(_Regra(chave == "allow", valor, _compilar(valor)))
             elif chave == "crawl-delay":
-                try:
+                with contextlib.suppress(ValueError):
                     atual.atraso = float(valor)
-                except ValueError:
-                    pass
 
     def _grupo(self, agente: str) -> _Grupo | None:
         agente = agente.lower()
@@ -95,13 +94,12 @@ class Robots:
         alvo = (p.path or "/") + (f"?{p.query}" if p.query else "")
         vencedora: _Regra | None = None
         for r in g.regras:
-            if r.regex.match(alvo):
-                if (
-                    vencedora is None
-                    or r.tamanho > vencedora.tamanho
-                    or (r.tamanho == vencedora.tamanho and r.permitir and not vencedora.permitir)
-                ):
-                    vencedora = r
+            if r.regex.match(alvo) and (
+                vencedora is None
+                or r.tamanho > vencedora.tamanho
+                or (r.tamanho == vencedora.tamanho and r.permitir and not vencedora.permitir)
+            ):
+                vencedora = r
         return True if vencedora is None else vencedora.permitir
 
     def atraso(self, agente: str) -> float | None:

@@ -33,11 +33,13 @@ python -m precos nova "Line 6 HX Stomp" --modelo "line 6 hx stomp" --condicao no
 - Sem chave (caso padrão): use a ferramenta **WebSearch** com `allowed_domains`, em lotes (varejistas grandes; lojas especializadas; marketplaces). Varie nome exato, marca+modelo, código do fabricante/EAN, grafias. Registre cada URL:
   `python -m precos candidato URL --preco 4299 --titulo "..." --origem "WebSearch 24/10/2026"` (o preço fica **não confirmado**; só informe `--preco` se o resultado atribuiu aquele valor àquele link).
 - Descarte listagens/buscas (páginas `/busca/`, `?q=`): são proibidas pelo robots de vários sites e não são a ficha do produto.
+- Resumos de busca misturam preços de lojas diferentes: **só atribua preço a um link se a saída disser explicitamente qual preço é daquele link**.
 
 **3. Verificar na fonte.** `python -m precos verificar URL1 URL2 ...` (respeita robots.txt, 2 s entre requisições ao mesmo host, cache de 30 min; `--fresco` ignora o cache; `--renderizar` usa Chromium só para páginas que exigem JavaScript, com as mesmas regras).
 Leia a saída: `VERIFICADA`, `INDISPONIVEL`, `BLOQUEADA`, `ERRO`. Para cada alerta, decida: reverificar, pedir conferência manual ou descartar.
 
 **4. Completar com dados que o robô não alcança** (somente se você os viu de fato):
+- **Loja que bloqueou o robô ou não publica preço estruturado** (status `BLOQUEADA`/`ERRO`): peça ao usuário para abrir o link e informar preço, disponibilidade e nome do anúncio; então `python -m precos anotar OFERTA_ID --fonte "navegador dd/mm hh:mm" --preco 4.299 --titulo "nome do anúncio" --disponibilidade em_estoque`. Isso promove a oferta a verificada-manual e **refaz a checagem do modelo** (um “XL” ou “usado” digitado continua sendo excluído). Nunca invente esses valores.
 - Frete/CEP, Pix/parcelas do carrinho: `python -m precos anotar OFERTA_ID --fonte "carrinho em dd/mm hh:mm, CEP ..." --frete 49,90 --parcela 12x358,25:sj`.
 - Loja: CNPJ e idade do domínio são consultados automaticamente (Receita via BrasilAPI; RDAP do Registro.br) quando o CNPJ aparece na página. Reputação independente e classificação (oficial/autorizado/varejista) só entram com URL de fonte: `python -m precos loja DOMINIO --tier autorizado --fonte URL` / `--nota 8.2 --escala 10 --nota-fonte URL`. Reclame Aqui bloqueia automação: use WebSearch para ver o perfil público e registre **o que apareceu**, com a URL e a data.
 - Marketplaces: o CNPJ/domínio **não** descreve o vendedor. Identifique o vendedor real do anúncio ou deixe "não verificado".
@@ -46,7 +48,7 @@ Leia a saída: `VERIFICADA`, `INDISPONIVEL`, `BLOQUEADA`, `ERRO`. Para cada aler
 
 **6. Entregar.** Traga para o usuário: veredito, tabela (só dados reais), links diretos com data/hora, comparação de pagamento (valor total e economia em R$), análise de confiabilidade com fontes, conclusão curta. Declare a confiança da pesquisa e **por quê**. Se só uma loja foi verificada, diga que **não há base de comparação** — não chame de "melhor compra".
 
-**7. Monitoramento** (só se o usuário pedir): `python -m precos monitor add --alvo 3.500 --pagamento vista --intervalo-h 24 --ate 2026-12-31`. Avise que **nada roda sozinho** (ver README → Monitoramento).
+**7. Monitoramento** (só se o usuário pedir): `python -m precos monitor add --alvo 3.500 --pagamento vista --intervalo-h 24 --ate 2026-12-31`. Avise que **nada roda sozinho**: o agendamento (cron/systemd) e o canal de aviso (`NTFY_TOPIC`, `TELEGRAM_*` ou `ALERT_WEBHOOK_URL`) são do usuário — ver `docs/AGENDAMENTO.md`. Só use `monitor check --notificar` se o usuário pediu avisos; nunca envie notificação por iniciativa própria.
 
 ## Quando a confiança pode ser "alta"
 Somente se, na oferta vencedora, **preço, produto, vendedor e condição de pagamento** estiverem confirmados (não "estimado"), a loja tiver ≥ 40% de verificação independente, os dados estiverem frescos (< 6 h) e houver **≥ 3 lojas** verificadas e elegíveis. Pix/parcelas lidos do texto da página são sempre "estimado" até serem confirmados no checkout (`anotar`).

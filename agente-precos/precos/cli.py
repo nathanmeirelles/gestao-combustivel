@@ -8,16 +8,19 @@ import logging
 import re
 import sys
 import time
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from . import __version__
 from .apis import ApiJson
 from .config import Config
 from .discovery import SemProvedor, buscar, provedores_configurados
+from .matching import avaliar_identidade
 from .models import Consulta, Evidencia, Oferta, Parcelamento, Status
+from .notify import canais_configurados, notificar
 from .pipeline import Pipeline
 from .report import confianca_geral, melhor_elegivel, nome_loja, relatorio
+from .scoring import custo_de
 from .seller import Loja, TIERS, consultar_cep, consultar_cnpj, idade_dominio
 from .store import Store
 from .util import agora_brt, fmt_brl, fmt_cnpj, fmt_dt, parse_valor_usuario
@@ -74,17 +77,23 @@ def cmd_doctor(args) -> int:
     except Exception as e:
         item("banco SQLite", False, f"{type(e).__name__}: {e}")
 
+    def consulta(resultado):
+        """(ok, detalhe) a partir de um par (dado, erro) das consultas públicas."""
+        dado, erro = resultado
+        return dado is not None, (erro or "")
+
     for nome, fn in (
-        ("CNPJ (BrasilAPI → Receita)", lambda: consultar_cnpj("00.000.000/0001-91", api)[0] is not None),
-        ("CEP (ViaCEP)", lambda: consultar_cep("01001-000", api)[0] is not None),
-        ("idade de domínio .br (RDAP Registro.br)", lambda: idade_dominio("mundomusical.com.br", api)[0] is not None),
+        ("CNPJ (BrasilAPI → Receita)", lambda: consulta(consultar_cnpj("00.000.000/0001-91", api))),
+        ("CEP (ViaCEP)", lambda: consulta(consultar_cep("01001-000", api))),
+        ("idade de domínio .br (RDAP Registro.br)", lambda: consulta(idade_dominio("mundomusical.com.br", api))),
     ):
         t0 = time.time()
         try:
-            ok = fn()
+            ok, causa = fn()
         except Exception as e:  # diagnóstico nunca derruba
-            ok = False
-        item(nome, ok, f"{time.time() - t0:.1f}s")
+            ok, causa = False, type(e).__name__
+        limite = " (provável limite de taxa do serviço; tente de novo em alguns minutos)" if "403" in causa or "429" in causa else ""
+        item(nome, ok, f"{time.time() - t0:.1f}s" + (f" — {causa}{limite}" if causa and not ok else ""))
 
     provs = provedores_configurados(cfg)
     item("busca automática (Brave/Google CSE)", True if provs else None, ", ".join(provs) if provs else "sem chave: use WebSearch na sessão ou forneça URLs")
@@ -104,7 +113,8 @@ def cmd_doctor(args) -> int:
             item("Chromium headless", False, str(e).splitlines()[0][:100])
     item("cálculo de frete", None, "sem API de frete: informe o valor lido no carrinho com `precos anotar`")
     item("agendamento / monitoramento contínuo", None, "nenhum agendador ativo: `monitor check` roda só quando chamado (cron/GitHub Actions/tarefa agendada)")
-    item("notificações", None, "nenhum canal configurado; `monitor check` apenas imprime alertas")
+    canais = canais_configurados(cfg)
+    item("notificações", True if canais else None, ", ".join(canais) + " (use `monitor check --notificar`)" if canais else "nenhum canal configurado (NTFY_TOPIC, ALERT_WEBHOOK_URL, TELEGRAM_*); `monitor check` apenas imprime")
 
     larg = max(len(n) for n, _, _ in linhas)
     print(f"agente-precos {__version__} — diagnóstico em {fmt_dt(agora_brt())}\n")
@@ -133,7 +143,7 @@ def cmd_nova(args) -> int:
 def cmd_consultas(args) -> int:
     _, store, _ = _ctx(args)
     for c in store.consultas():
-        n = len(store.ultimas_ofertas(c.id))
+        n = len(store.ultimas_ofertas(c.id)) if c.id is not None else 0
         print(f"#{c.id}  {fmt_dt(c.criada_em)}  {c.texto}  [{n} anúncio(s)]")
     return 0
 
@@ -214,6 +224,26 @@ def cmd_anotar(args) -> int:
     o.coletado_em = agora_brt()
     quando = f"informado manualmente em {fmt_dt(o.coletado_em)}; fonte: {args.fonte}"
     mudou = []
+    if args.preco is not None:
+        if args.preco <= 0:
+            print("--preco deve ser maior que zero.", file=sys.stderr)
+            return 2
+        o.preco_exibido, o.preco_cartao_vista = args.preco, None      # o valor lido por você substitui qualquer derivado do texto
+        o.evidencias.pop("preco_cartao_vista", None)
+        o.marcar("preco_exibido", Evidencia.CONFIRMADO_DIRETAMENTE)
+        o.fonte_dados = "manual"
+        mudou.append("preço")
+    if args.titulo:
+        o.titulo = args.titulo
+        mudou.append("título")
+    if args.condicao:
+        o.condicao = args.condicao
+        o.marcar("condicao", Evidencia.CONFIRMADO_DIRETAMENTE)
+        mudou.append("condição")
+    if args.disponibilidade:
+        o.disponibilidade = args.disponibilidade
+        o.marcar("disponibilidade", Evidencia.CONFIRMADO_DIRETAMENTE)
+        mudou.append("disponibilidade")
     if args.frete is not None:
         o.frete_valor = args.frete
         o.frete_nota = args.frete_nota
@@ -244,6 +274,22 @@ def cmd_anotar(args) -> int:
     if not mudou:
         print("Nada para anotar.", file=sys.stderr)
         return 2
+    # estado da oferta: leitura humana do preço promove uma oferta que o robô não conseguiu ler
+    if o.preco_exibido and args.preco is not None and o.status in (Status.BLOQUEADA, Status.ERRO, Status.NAO_CONFIRMADA):
+        o.alertas.append("oferta promovida a verificada por leitura manual (o robô não conseguiu ler a página)")
+        o.status = Status.VERIFICADA
+    if o.status in (Status.VERIFICADA, Status.INDISPONIVEL) and o.disponibilidade:
+        o.status = Status.INDISPONIVEL if o.disponibilidade == "sem_estoque" else Status.VERIFICADA
+    # a identidade do produto é conferida de novo com o título/condição/URL atuais
+    if any(m in mudou for m in ("preço", "título", "condição")):
+        consulta = store.consulta(o.consulta_id) if o.consulta_id is not None else None
+        if consulta is not None:
+            o.identidade_produto, motivos = avaliar_identidade(o.titulo, consulta, o, url=o.url, titulos_extra=o.titulos_alt)
+            o.notas += motivos
+            o.marcar("produto", {"confere": Evidencia.CONFIRMADO_INDEPENDENTE if (consulta.gtin and o.gtin == consulta.gtin) else Evidencia.ESTIMADO,
+                                 "divergente": Evidencia.DIVERGENTE}.get(o.identidade_produto or "", Evidencia.NAO_VERIFICADO))
+        if not o.titulo:
+            print("Dica: informe --titulo (nome do anúncio) para o agente conferir se é o modelo pedido.", file=sys.stderr)
     o.notas.append(f"anotação ({', '.join(mudou)}): {quando}")
     store.salvar_oferta(o)
     print(f"Nova observação #{o.id} da oferta #{args.oferta}: {', '.join(mudou)} registrados como confirmados com fonte '{args.fonte}'.")
@@ -253,8 +299,8 @@ def cmd_anotar(args) -> int:
 def cmd_cnpj(args) -> int:
     cfg = Config.from_env()
     i, erro = consultar_cnpj(args.cnpj, ApiJson(cfg))
-    if erro:
-        print(erro, file=sys.stderr)
+    if erro or i is None:
+        print(erro or "consulta de CNPJ sem resultado", file=sys.stderr)
         return 1
     print(f"{fmt_cnpj(i.cnpj)} — {i.razao_social} ({i.nome_fantasia or 'sem fantasia'})\n  situação: {i.situacao} · aberta em {i.abertura} ({i.anos_atividade:.1f} anos)"
           f"\n  {i.cnae} · {i.municipio}/{i.uf}\n  fonte: {i.fonte} (consultado em {fmt_dt(agora_brt())})")
@@ -263,8 +309,8 @@ def cmd_cnpj(args) -> int:
 
 def cmd_cep(args) -> int:
     info, erro = consultar_cep(args.cep, ApiJson(Config.from_env()))
-    if erro:
-        print(erro, file=sys.stderr)
+    if erro or info is None:
+        print(erro or "consulta de CEP sem resultado", file=sys.stderr)
         return 1
     print(f"{info.get('logradouro')}, {info.get('bairro')} — {info.get('localidade')}/{info.get('uf')}")
     return 0
@@ -309,13 +355,13 @@ def cmd_descobrir(args) -> int:
     cfg, store, pipe = _ctx(args)
     try:
         achados, erros = buscar(cfg, ApiJson(cfg), args.consulta_texto, _lista(args.dominios), args.limite)
-    except SemProvedor as e:
-        print(str(e), file=sys.stderr)
+    except SemProvedor as sem:
+        print(str(sem), file=sys.stderr)
         return 3
     for c in achados:
         print(f"- {c.titulo}\n  {c.url}\n  {c.trecho[:140]}")
-    for e in erros:
-        print(f"erro: {e}", file=sys.stderr)
+    for falha in erros:
+        print(f"erro: {falha}", file=sys.stderr)
     if args.registrar and achados:
         cid = _cid(args, store)
         for c in achados:
@@ -345,7 +391,9 @@ def cmd_monitor(args) -> int:
         print("Monitor desativado." if store.desativar_monitor(args.id) else "Monitor não encontrado.")
         return 0
     # check
-    alertas = 0
+    canais = canais_configurados(cfg)
+    if args.notificar and not canais:
+        print("Aviso: --notificar sem nenhum canal configurado (NTFY_TOPIC, ALERT_WEBHOOK_URL ou TELEGRAM_BOT_TOKEN+TELEGRAM_CHAT_ID); só imprimirei os alertas.", file=sys.stderr)
     for m in store.monitores():
         if args.id and m["id"] != args.id:
             continue
@@ -354,35 +402,53 @@ def cmd_monitor(args) -> int:
             print(f"Monitor #{m['id']} expirou em {m['ate']} e foi desativado.")
             continue
         if not args.forcar and m.get("ultimo_check"):
-            from datetime import datetime
             horas = (agora_brt() - datetime.fromisoformat(m["ultimo_check"])).total_seconds() / 3600
             if horas < m["intervalo_h"]:
                 print(f"Monitor #{m['id']}: última checagem há {horas:.1f}h (intervalo {m['intervalo_h']}h); pulado. Use --forcar.")
                 continue
-        urls = [o.url for o in store.ultimas_ofertas(m["consulta_id"]) if o.status != Status.NAO_CONFIRMADA or True]
+        atuais = store.ultimas_ofertas(m["consulta_id"])
+        urls = [o.url for o in atuais if _reverificavel(o)]
+        pulados = len(atuais) - len(urls)
         if m.get("lojas"):
             urls = [u for u in urls if any(d in u for d in m["lojas"])]
         for u in urls:
             pipe.verificar(m["consulta_id"], u, fresco=True)
+        if pulados:
+            print(f"Monitor #{m['id']}: {pulados} anúncio(s) não reverificados (bloqueados pelo site ou sem preço legível; não insistimos).")
         comp = pipe.comparar(m["consulta_id"])
         modo = "parcelado" if m["pagamento"] == "parcelado" else "vista"
-        rank = [p for p in comp.ranking.get(modo, comp.ranking.get("vista", [])) if p.elegivel and p.custo]
         ordem = {"baixa": 0, "média": 1, "alta": 2}
-        rank = [p for p in rank if ordem[p.confianca] >= ordem.get(m.get("confiabilidade_min") or "baixa", 0)]
-        melhor = min(rank, key=lambda p: p.custo.total, default=None)
+        minimo = ordem.get(m.get("confiabilidade_min") or "baixa", 0)
+        rank = [p for p in comp.ranking.get(modo, comp.ranking.get("vista", [])) if p.elegivel and p.custo and ordem[p.confianca] >= minimo]
+        melhor = min(rank, key=lambda p: custo_de(p).total, default=None)
         agora = agora_brt().isoformat()
         if melhor is None:
             store.atualizar_monitor(m["id"], ultimo_check=agora)
             print(f"Monitor #{m['id']}: nenhuma oferta elegível na checagem.")
             continue
-        preco = melhor.custo.produto
+        preco = custo_de(melhor).produto
+        alvo = Decimal(m["preco_alvo"])
         store.atualizar_monitor(m["id"], ultimo_check=agora, ultimo_preco=str(preco))
-        if preco <= Decimal(m["preco_alvo"]):
-            alertas += 1
-            print(f"ALERTA monitor #{m['id']}: {nome_loja(melhor.oferta)} a {fmt_brl(preco)} atingiu o alvo de {fmt_brl(Decimal(m['preco_alvo']))} — {melhor.oferta.url}")
-        else:
-            print(f"Monitor #{m['id']}: menor preço elegível {fmt_brl(preco)} (alvo {fmt_brl(Decimal(m['preco_alvo']))}).")
+        if preco > alvo:
+            print(f"Monitor #{m['id']}: menor preço elegível {fmt_brl(preco)} (alvo {fmt_brl(alvo)}).")
+            continue
+        linha = f"{comp.consulta.texto}: {nome_loja(melhor.oferta, comp.lojas)} a {fmt_brl(preco)} atingiu o alvo de {fmt_brl(alvo)} — {melhor.oferta.url}"
+        repetido = m.get("ultimo_alerta_preco") == str(preco)
+        print(f"ALERTA monitor #{m['id']}: {linha}" + (" (já notificado)" if repetido and args.notificar else ""))
+        if args.notificar and canais and not repetido:
+            envio = notificar(cfg, "Preço-alvo atingido", linha + f"\nConfira vendedor, estoque e frete antes de pagar. Consultado em {fmt_dt(melhor.oferta.coletado_em)}.")
+            for canal, ok, erro in envio:
+                print(f"  notificação via {canal}: {'enviada' if ok else 'FALHOU (' + str(erro) + ')'}")
+            if any(ok for _, ok, _ in envio):
+                store.atualizar_monitor(m["id"], ultimo_alerta_preco=str(preco))
     return 0
+
+
+def _reverificavel(o: Oferta) -> bool:
+    """Monitor só reabre páginas que já deram certo (ou falharam por rede); nunca reinsiste onde o site recusou."""
+    if o.status in (Status.VERIFICADA, Status.INDISPONIVEL, Status.NAO_CONFIRMADA):
+        return True
+    return o.status == Status.ERRO and any("falha técnica" in a for a in o.alertas)
 
 
 # ------------------------------------------------------------------ parser
@@ -443,6 +509,10 @@ def montar_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("anotar", help="registra dado lido manualmente (carrinho/checkout) com fonte obrigatória")
     s.add_argument("oferta", type=int)
     s.add_argument("--fonte", required=True, help="de onde veio (ex.: 'carrinho em 24/10 14:02, CEP informado')")
+    s.add_argument("--preco", type=valor_cli, help="preço de lista/cartão lido por você na página (promove ofertas bloqueadas/sem preço a 'verificada')")
+    s.add_argument("--titulo", help="nome do anúncio, para conferir se é o modelo pedido")
+    s.add_argument("--condicao", choices=["novo", "usado", "recondicionado", "danificado"])
+    s.add_argument("--disponibilidade", choices=["em_estoque", "sem_estoque", "sob_encomenda"])
     s.add_argument("--frete", type=valor_cli)
     s.add_argument("--frete-nota", help="prazo/modalidade")
     s.add_argument("--pix", type=valor_cli)
@@ -485,14 +555,16 @@ def montar_parser() -> argparse.ArgumentParser:
     s.add_argument("--ate", help="AAAA-MM-DD: data limite")
     s.add_argument("--conf-min", choices=["baixa", "média", "alta"], default="baixa")
     s.add_argument("--forcar", action="store_true")
+    s.add_argument("--notificar", action="store_true", help="envia o alerta aos canais configurados (ntfy/webhook/Telegram); sem esta opção só imprime")
     s.set_defaults(fn=cmd_monitor)
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
+    for fluxo in (sys.stdout, sys.stderr):
+        reconfigurar = getattr(fluxo, "reconfigure", None)
+        if callable(reconfigurar):
+            reconfigurar(encoding="utf-8")
     args = montar_parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO if args.verbose else logging.ERROR, format="%(levelname)s %(name)s: %(message)s")
     if args.cmd == "monitor" and args.acao == "add" and args.alvo is None:

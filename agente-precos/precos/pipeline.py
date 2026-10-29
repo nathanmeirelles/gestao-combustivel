@@ -22,6 +22,7 @@ from .util import agora_brt, dominio as dominio_de, parse_valor_usuario
 
 log = logging.getLogger("precos.pipeline")
 VALIDADE_CADASTRO = timedelta(days=30)
+ESPERA_APOS_FALHA = timedelta(hours=6)     # cache negativo: não insistir em serviço público que falhou/limitou taxa
 
 
 @dataclass
@@ -121,6 +122,9 @@ class Pipeline:
         if ex.preco_pix:
             o.preco_pix, o.meio_vista = ex.preco_pix, ex.meio_vista
             o.marcar("preco_pix", Evidencia.ESTIMADO)
+        if ex.preco_lista:
+            o.preco_cartao_vista = ex.preco_lista
+            o.marcar("preco_cartao_vista", Evidencia.ESTIMADO)
         if ex.parcelamentos:
             o.parcelamentos = ex.parcelamentos
             o.marcar("parcelamentos", Evidencia.ESTIMADO)
@@ -165,22 +169,30 @@ class Pipeline:
             cnpj = loja.cnpj or (ref.cnpj_pagina if ref else None)
             alterou = False
             if cnpj and (loja.identidade is None or loja.identidade.get("cnpj") != cnpj or _velho(loja.identidade.get("consultado_em"))):
-                ident, erro = consultar_cnpj(cnpj, self.api)
-                if ident:
-                    loja.identidade, alterou = ident.to_dict(), True
+                if _recente(loja.cnpj_tentado_em, ESPERA_APOS_FALHA):
+                    avisos.append(f"{dom}: consulta de CNPJ falhou há pouco; nova tentativa só depois de {ESPERA_APOS_FALHA.seconds // 3600} h")
                 else:
-                    avisos.append(f"{dom}: {erro}")
+                    ident, erro = consultar_cnpj(cnpj, self.api)
+                    if ident:
+                        loja.identidade, loja.cnpj_tentado_em, alterou = ident.to_dict(), None, True
+                    else:
+                        loja.cnpj_tentado_em, alterou = agora_brt().isoformat(), True
+                        avisos.append(f"{dom}: {erro}")
             if loja.identidade:
                 ident = Identidade.from_dict(loja.identidade)
                 comp = ident.compativel_com(loja.nome, ref.loja if ref else None, dom)
                 if loja.identidade.get("compativel") != comp:
                     loja.identidade["compativel"], alterou = comp, True
             if loja.rdap is None or _velho(loja.rdap.get("consultado_em")):
-                rd, erro = idade_dominio(dom, self.api)
-                if rd:
-                    loja.rdap, alterou = rd, True
-                elif erro and "só é verificada" not in erro:
-                    avisos.append(f"{dom}: {erro}")
+                if _recente(loja.rdap_tentado_em, ESPERA_APOS_FALHA):
+                    avisos.append(f"{dom}: consulta de domínio falhou há pouco; nova tentativa só depois de {ESPERA_APOS_FALHA.seconds // 3600} h")
+                else:
+                    rd, erro = idade_dominio(dom, self.api)
+                    if rd:
+                        loja.rdap, loja.rdap_tentado_em, alterou = rd, None, True
+                    elif erro and "só é verificada" not in erro:
+                        loja.rdap_tentado_em, alterou = agora_brt().isoformat(), True
+                        avisos.append(f"{dom}: {erro}")
             if alterou:
                 self.store.salvar_loja(loja)
         return avisos
@@ -211,9 +223,19 @@ class Pipeline:
         modos = [c.pagamento] if c.pagamento in ("vista", "parcelado") else ["vista", "parcelado"]
         ranking = {m: pontuar(ofertas, c, lojas, m, self.cfg.desatualizada_apos_h) for m in modos}
         serie = serie_do_produto(self.store, c)
-        melhor = next((p for p in ranking.get("vista", []) if p.elegivel and p.oferta.preco_exibido), None)
-        classificacao = classificar(melhor.oferta.preco_exibido, serie) if melhor else None
+        preco_ref = next((p.oferta.preco_ref for p in ranking.get("vista", []) if p.elegivel and p.oferta.preco_ref), None)
+        classificacao = classificar(preco_ref, serie) if preco_ref is not None else None
         return Comparacao(c, agora_brt(), ofertas, lojas, ranking, [o for o in ofertas if o.status != Status.VERIFICADA], avisos, serie, classificacao)
+
+
+def _recente(iso: str | None, janela: timedelta) -> bool:
+    """True se `iso` é um instante válido dentro da janela até agora."""
+    if not iso:
+        return False
+    try:
+        return agora_brt() - datetime.fromisoformat(iso) < janela
+    except ValueError:
+        return False
 
 
 def _velho(iso: str | None) -> bool:

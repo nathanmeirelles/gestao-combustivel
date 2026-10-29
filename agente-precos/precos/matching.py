@@ -60,7 +60,6 @@ def avaliar_identidade(titulo: str | None, c: Consulta, oferta: Oferta | None = 
         return "incerto", ["anúncio sem título legível"]
 
     tt = tokens(titulo)
-    texto_norm = " ".join(tt)
     exigidos = _requeridos(c)
     faltando = [t for t in exigidos if t not in tt]
 
@@ -102,7 +101,7 @@ def avaliar_identidade(titulo: str | None, c: Consulta, oferta: Oferta | None = 
         frac = len(faltando) / len(exigidos)
         m = f"título não contém: {', '.join(faltando)}"
         return ("divergente" if frac > 0.4 else "incerto"), [m]
-    avisos = []
+    avisos: list[str] = []
     if set(tt) & _COMBO:
         return "incerto", ["anúncio parece kit/combo: pode incluir itens extras ou ser outro produto"]
     return "confere", avisos or ["título contém todos os termos do modelo (checagem por título, não é prova)"]

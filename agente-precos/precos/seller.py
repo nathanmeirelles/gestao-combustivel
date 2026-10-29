@@ -7,7 +7,7 @@ from datetime import date, datetime
 
 from .apis import ApiJson
 from .matching import tokens
-from .util import agora_brt, cnpj_digitos, cnpj_valido, dominio as dominio_de, fmt_cnpj
+from .util import agora_brt, cnpj_digitos, cnpj_valido
 
 URL_CNPJ = "https://brasilapi.com.br/api/cnpj/v1/{}"
 URL_CEP = "https://viacep.com.br/ws/{}/json/"
@@ -47,10 +47,13 @@ class Identidade:
     consultado_em: str
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Identidade":
+    def from_dict(cls, d: dict) -> Identidade:
         """Tolerante a cadastros antigos/incompletos: campo ausente vira None em vez de derrubar a comparação."""
-        campos = cls.__dataclass_fields__.keys()
-        return cls(**{k: d.get(k) for k in campos})
+        return cls(
+            cnpj=str(d.get("cnpj") or ""), razao_social=d.get("razao_social"), nome_fantasia=d.get("nome_fantasia"),
+            situacao=d.get("situacao"), abertura=d.get("abertura"), cnae=d.get("cnae"), municipio=d.get("municipio"),
+            uf=d.get("uf"), fonte=str(d.get("fonte") or ""), consultado_em=str(d.get("consultado_em") or ""),
+        )
 
     @property
     def ativa(self) -> bool:
@@ -161,6 +164,8 @@ class Loja:
     politicas_fonte: str | None = None
     identidade: dict | None = None          # cache da consulta de CNPJ
     rdap: dict | None = None                # cache da consulta de domínio
+    cnpj_tentado_em: str | None = None      # última tentativa de consulta que FALHOU (cache negativo)
+    rdap_tentado_em: str | None = None
     notas: list[str] = field(default_factory=list)
 
     def definir_tier(self, tier: str, fonte: str | None) -> None:
@@ -182,6 +187,6 @@ class Loja:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Loja":
+    def from_dict(cls, d: dict) -> Loja:
         validos = cls.__dataclass_fields__.keys()
         return cls(**{k: v for k, v in d.items() if k in validos})

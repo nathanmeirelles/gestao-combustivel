@@ -1,5 +1,5 @@
 # Pesquisa de preço #1 — Line 6 HX Stomp
-_Gerado em 24/10/2026 12:51 (Brasília). Condição: **novo**, até 12x, sem CEP (frete não calculado)._
+_Gerado em 29/10/2026 09:02 (Brasília). Condição: **novo**, até 12x, sem CEP (frete não calculado)._
 
 ## A. Veredito
 **Única oferta verificada e elegível: Harmonia Musical LTDA (harmoniamusical.com.br)** — Pedaleira Line 6 HX Stomp - AAF6334
@@ -18,12 +18,12 @@ _Gerado em 24/10/2026 12:51 (Brasília). Condição: **novo**, até 12x, sem CEP
 ## C. Links diretos
 **1. Harmonia Musical LTDA (harmoniamusical.com.br)** — [Pedaleira Line 6 HX Stomp - AAF6334](https://harmoniamusical.com.br/pedaleira-line-6-hx-stomp-183059.html)
 - Preço: R$ 9.190,00 (confirmado); disponibilidade: não informada
-- Consultado em 24/10/2026 12:40 (Brasília)
+- Consultado em 29/10/2026 09:01 (Brasília)
 - Observações: Pix/parcelamento lidos do texto da página por heurística: confirme no checkout
 
 ## D. Comparação de pagamento
 - **À vista — melhor:** Harmonia Musical LTDA (harmoniamusical.com.br): R$ 8.730,50 — à vista, meio de pagamento não especificado; total R$ 8.730,50.
-  - O preço à vista com desconto (não especificado) economiza R$ 459,50 (5.0%) sobre o cartão nesta loja — lido do texto da página (estimado); confirme no checkout.
+  - O preço à vista com desconto (meio de pagamento não especificado) economiza R$ 459,50 (5.0%) sobre o cartão nesta loja — lido do texto da página (estimado); confirme no checkout.
 - **Parcelado — melhor:** Harmonia Musical LTDA (harmoniamusical.com.br): 10x de R$ 919,00 = R$ 9.190,00 (sem juros).
   - Pagar à vista na melhor oferta custa R$ 459,50 (5.0%) a menos que parcelar nesta.
 - **Cupons e cashback:** não verificados nesta pesquisa; nenhum foi somado a qualquer total.
@@ -44,7 +44,7 @@ Se preferir parcelar, a melhor condição verificada é Harmonia Musical LTDA (h
 **Antes de pagar:** abra o link, confira vendedor, estoque, frete para o seu CEP e as condições de pagamento no carrinho. Nenhuma compra foi feita.
 
 ## Momento da compra
-- **Dados insuficientes para classificar** — 2 observações em 0 dias; são necessárias ao menos 8 em 14+ dias. Wayback Machine e comparadores com histórico não estão acessíveis neste ambiente, então o histórico cresce a cada verificação.
+- **Dados insuficientes para classificar** — 3 observações em 5 dias; são necessárias ao menos 8 em 14+ dias. Wayback Machine e comparadores com histórico não estão acessíveis neste ambiente, então o histórico cresce a cada verificação.
 - Não há garantia de queda de preço; sem urgência, o monitoramento (`precos monitor`) acompanha o preço-alvo com observações próprias.
 
 ## Encontradas, porém fora do veredito
@@ -52,11 +52,11 @@ Se preferir parcelar, a melhor condição verificada é Harmonia Musical LTDA (h
 - [magazineluiza.com.br/pedaleira-line-6-hx-stomp-de-guitarra-com-mu](https://www.magazineluiza.com.br/pedaleira-line-6-hx-stomp-de-guitarra-com-multi-efeitos/p/aa6h60jg74/im/inpe/) — magazineluiza.com.br: **bloqueada para leitura automática** — não contornamos bloqueios anti-robô: confira a oferta manualmente no navegador
 - [magazineluiza.com.br/pedaleira-de-guitarra-line-6-hx-stomp-multi-](https://www.magazineluiza.com.br/pedaleira-de-guitarra-line-6-hx-stomp-multi-efeitos/p/ebje2ejf76/im/inpe/) — magazineluiza.com.br: **bloqueada para leitura automática** — não contornamos bloqueios anti-robô: confira a oferta manualmente no navegador
 - [produto.mercadolivre.com.br/MLB-1580457369-line-6-hx-stomp-multi-efeitos](https://produto.mercadolivre.com.br/MLB-1580457369-line-6-hx-stomp-multi-efeitos-_JM) — produto.mercadolivre.com.br: **não foi possível verificar** — HTTP 302
-- [Line 6 HX STOMP Multi Effects | Lacrada](https://www.pedalboardsupply.com.br/produtos/line-6-hx-stomp-multi-effects-semi-nova-tr3u4/) — pedalboardsupply.com.br: **sem estoque** — preço na página R$ 4.599,00 (confirmado), porém **sem estoque**; sinais CONTRADITÓRIOS de condição: URL indica 'semi' × título indica 'lacrada'; título da página (1) indica 'lacrada' — confirme com o vendedor
 - [Line 6 Pedal de guitarra HX Stomp Multi-Efeitos, preto : Amazon.com.br: Instrumentos Musicais](https://www.amazon.com.br/Line-guitarra-HX-Stomp-Multi-Efeitos/dp/B07J2LV1N1) — amazon.com.br: **não foi possível verificar** — marketplace: vendedor real NÃO identificado nesta página
 - [mercadolivre.com.br/pedaleira-multiefeitos-line-6-hx-stomp-compa](https://www.mercadolivre.com.br/pedaleira-multiefeitos-line-6-hx-stomp-compacta-c-emulador-e-looper/p/MLB17366234) — mercadolivre.com.br: **bloqueada para leitura automática** — não contornamos bloqueios anti-robô: confira a oferta manualmente no navegador
 - [Americanas Empresas agora é Americanas!](https://empresas.americanas.com.br/produto/1769545245) — americanas.com.br: **não foi possível verificar** — marketplace: vendedor real NÃO identificado nesta página
 - [bestpricesbrasil.com.br/line-6-hx-stomp-pedaleira-multi-efeitos-para](https://www.bestpricesbrasil.com.br/line-6-hx-stomp-pedaleira-multi-efeitos-para-guitarra-da-line-6) — bestpricesbrasil.com.br: **não foi possível verificar** — falha técnica (não é recusa do site): pode ser tentada novamente mais tarde
+- [Line 6 HX STOMP Multi Effects | Lacrada](https://www.pedalboardsupply.com.br/produtos/line-6-hx-stomp-multi-effects-semi-nova-tr3u4/) — pedalboardsupply.com.br: **sem estoque** — preço na página R$ 4.599,00 (confirmado), porém **sem estoque**; sinais CONTRADITÓRIOS de condição: URL indica 'semi' × título indica 'lacrada'; título da página (1) indica 'lacrada' — confirme com o vendedor
 
 ---
 _Níveis de evidência: confirmado (lido na página da oferta) · confirmado (fonte independente: Receita/Registro.br) · estimado (heurística sobre texto) · não verificado · divergente._

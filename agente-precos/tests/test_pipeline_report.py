@@ -249,7 +249,6 @@ class RelatorioTest(unittest.TestCase):
 
     def test_loja_com_cnpj_e_dominio_verificados_pode_ter_confianca_media_ou_alta(self):
         pipe, store, cid = self._cenario()
-        from precos.seller import Loja
         lj = store.loja("a.com.br")
         lj.identidade = {"cnpj": "00000000000191", "situacao": "ATIVA", "abertura": "2005-01-01", "razao_social": "A LTDA", "compativel": True, "fonte": "https://brasilapi", "consultado_em": agora_brt().isoformat()}
         lj.rdap = {"idade_dias": 4000, "registrado_em": "2015-01-01", "fonte": "https://rdap", "consultado_em": agora_brt().isoformat()}
@@ -297,6 +296,14 @@ class RelatorioTest(unittest.TestCase):
                          "compativel": True, "fonte": "https://brasilapi", "consultado_em": agora_brt().isoformat()}
         store.salvar_loja(lj)
         self.assertIn("Harmonia Musical LTDA (harmonia.com.br)", relatorio(pipe.comparar(cid)))
+
+    def test_meio_nao_especificado_tem_redacao_completa(self):
+        corpo = "<p>R$ 4.300,00 R$ 4.085,00 à vista ou 10x de R$ 430,00 sem juros</p>"
+        pipe, _, cid = montar({"https://a.com.br/p": html("Pedaleira Line 6 HX Stomp", "4300.00", corpo=corpo)})
+        pipe.verificar(cid, "https://a.com.br/p")
+        txt = relatorio(pipe.comparar(cid))
+        self.assertIn("(meio de pagamento não especificado) economiza", txt)
+        self.assertNotIn("(não especificado) economiza", txt)
 
     def test_sem_ofertas_verificadas_diz_que_nao_ha_recomendacao(self):
         pipe, store, cid = montar({})

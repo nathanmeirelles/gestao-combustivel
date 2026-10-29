@@ -40,7 +40,7 @@ class FakeSessao:
 
 def montar(rotas, **cfg):
     tmp = tempfile.mkdtemp()
-    base = dict(data_dir=Path(tmp), intervalo_min_s=2.0, max_tentativas=3)
+    base = {"data_dir": Path(tmp), "intervalo_min_s": 2.0, "max_tentativas": 3}
     base.update(cfg)
     sess = FakeSessao(rotas)
     relogio = {"t": 1000.0}
@@ -152,6 +152,68 @@ class FetcherTest(unittest.TestCase):
         self.assertIn("não encontrada", f.obter("https://loja.com.br/p/9").erro)
 
 
+class RedirecionamentoSeguroTest(unittest.TestCase):
+    """Um site público não pode nos redirecionar para a rede interna nem para esquemas estranhos (SSRF)."""
+
+    def _redirect_para(self, destino):
+        return montar({
+            "https://loja.com.br/robots.txt": ROBOTS_OK,
+            "https://loja.com.br/p/1": [FakeResp(302, "", {"location": destino})],
+        })
+
+    def test_destinos_nao_permitidos_nunca_sao_requisitados(self):
+        for destino in ("http://169.254.169.254/latest/meta-data/", "http://127.0.0.1:8080/admin", "http://localhost/x",
+                        "http://192.168.0.1/", "http://10.0.0.7/x", "ftp://loja.com.br/arquivo", "http:///sem-host"):
+            f, sess, _ = self._redirect_para(destino)
+            r = f.obter("https://loja.com.br/p/1")
+            self.assertFalse(r.ok, destino)
+            self.assertIn("redirecionamento recusado", r.erro or "", destino)
+            self.assertEqual([u for u in sess.chamadas if u not in ("https://loja.com.br/robots.txt", "https://loja.com.br/p/1")], [], destino)
+
+    def test_robots_que_redireciona_para_rede_interna_e_recusado(self):
+        f, sess, _ = montar({
+            "https://loja.com.br/robots.txt": [FakeResp(301, "", {"location": "http://169.254.169.254/robots.txt"})],
+            "https://loja.com.br/p/1": [FakeResp(200, PAGINA)],
+        })
+        r = f.obter("https://loja.com.br/p/1")
+        self.assertFalse(r.ok)
+        self.assertIn("destino não permitido", r.erro)
+        self.assertNotIn("http://169.254.169.254/robots.txt", sess.chamadas)
+        self.assertNotIn("https://loja.com.br/p/1", sess.chamadas)
+
+    def test_redirecionamento_normal_continua_funcionando(self):
+        f, _, _ = montar({
+            "https://loja.com.br/robots.txt": ROBOTS_OK,
+            "https://loja.com.br/p/1": [FakeResp(302, "", {"location": "/p/2"})],
+            "https://loja.com.br/p/2": [FakeResp(200, PAGINA)],
+        })
+        self.assertTrue(f.obter("https://loja.com.br/p/1").ok)
+
+
+class CausaDaFalhaTest(unittest.TestCase):
+    def _falha(self, excecao):
+        f, _, _ = montar({"https://loja.com.br/robots.txt": ROBOTS_OK, "https://loja.com.br/p/1": [excecao]})
+        return f.obter("https://loja.com.br/p/1")
+
+    def test_causas_legiveis_sem_expor_url(self):
+        casos = {
+            "certificado/TLS": requests.exceptions.SSLError("falha em https://loja.com.br/p/1?token=SEGREDO"),
+            "tempo esgotado": requests.exceptions.ReadTimeout("t"),
+            "conexão recusada": requests.exceptions.ConnectionError("c"),
+            "política de acesso": requests.exceptions.ProxyError("p"),
+        }
+        for trecho, exc in casos.items():
+            r = self._falha(exc)
+            self.assertIn(trecho, r.erro, trecho)
+            self.assertNotIn("SEGREDO", r.erro)
+
+    def test_falha_no_robots_tambem_informa_a_causa(self):
+        f, _, _ = montar({"https://loja.com.br/robots.txt": [requests.exceptions.SSLError("x")], "https://loja.com.br/p/1": [FakeResp(200, PAGINA)]})
+        r = f.obter("https://loja.com.br/p/1")
+        self.assertFalse(r.robots_ok)
+        self.assertIn("certificado/TLS", r.erro)
+
+
 class BloqueioTest(unittest.TestCase):
     def test_pagina_de_desafio_pequena(self):
         self.assertTrue(detectar_bloqueio(200, "https://x.com", "<html>Just a moment...</html>"))
@@ -192,5 +254,6 @@ class RegressoesReaisTest(unittest.TestCase):
         f, _, _ = montar({"https://loja.com.br/robots.txt": [requests.ConnectionError("proxy 502")]})
         r = f.obter("https://loja.com.br/p/1")
         self.assertFalse(r.robots_ok)
-        self.assertIn("falha de rede", r.erro)
+        self.assertIn("não foi possível baixar o robots.txt", r.erro)
+        self.assertIn("conexão recusada ou interrompida", r.erro)   # a causa aparece
         self.assertIsNone(r.bloqueio)          # problema do ambiente não é "bloqueio do site"

@@ -30,8 +30,8 @@ def api(resp):
 
 
 def ident(**kw):
-    base = dict(cnpj="00000000000191", razao_social="MUNDO MUSICAL COMERCIO DE INSTRUMENTOS LTDA", nome_fantasia=None, situacao="ATIVA",
-                abertura="2000-01-01", cnae=None, municipio=None, uf=None, fonte="x", consultado_em="x")
+    base = {"cnpj": "00000000000191", "razao_social": "MUNDO MUSICAL COMERCIO DE INSTRUMENTOS LTDA", "nome_fantasia": None, "situacao": "ATIVA",
+            "abertura": "2000-01-01", "cnae": None, "municipio": None, "uf": None, "fonte": "x", "consultado_em": "x"}
     base.update(kw)
     return Identidade(**base)
 

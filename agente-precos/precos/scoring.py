@@ -83,8 +83,8 @@ def avaliar_confiabilidade(o: Oferta, loja: Loja | None, agora: datetime | None 
         except ValueError:
             anos = None
     if anos is not None and identidade_ok:
-        pts = 10 if anos >= 3 else 5 if anos >= 1 else 0
-        comps.append(Componente("tempo de operação", pts, 10, True, Evidencia.CONFIRMADO_INDEPENDENTE, f"CNPJ aberto há {anos:.1f} anos", ident.get("fonte")))
+        pts_tempo = 10 if anos >= 3 else 5 if anos >= 1 else 0
+        comps.append(Componente("tempo de operação", pts_tempo, 10, True, Evidencia.CONFIRMADO_INDEPENDENTE, f"CNPJ aberto há {anos:.1f} anos", (ident or {}).get("fonte")))
         if anos < 1:
             sinais.append("[MÉDIO] empresa aberta há menos de 1 ano")
     else:
@@ -102,9 +102,9 @@ def avaliar_confiabilidade(o: Oferta, loja: Loja | None, agora: datetime | None 
         comps.append(Componente("idade do domínio", 0, 5, False, Evidencia.NAO_VERIFICADO, "só verificável para domínios .br"))
 
     # 4) canal de venda (20) — exige evidência registrada
-    tier = loja.tier if loja else None
     base = {"oficial": 20, "autorizado": 20, "varejista": 15, "marketplace_verificavel": 10, "insuficiente": 0, "risco": 0}
-    if tier:
+    tier = loja.tier if loja and loja.tier in base else None      # tier desconhecido (cadastro editado à mão) = não registrado
+    if loja and tier:
         comps.append(Componente("canal de venda", base[tier], 20, True, Evidencia.CONFIRMADO_INDEPENDENTE if loja.tier_fonte else Evidencia.ESTIMADO, f"classificação: {tier.replace('_', ' ')}", loja.tier_fonte))
         if tier == "risco":
             sinais.append("[ALTO] loja classificada como de risco")
@@ -113,16 +113,16 @@ def avaliar_confiabilidade(o: Oferta, loja: Loja | None, agora: datetime | None 
         comps.append(Componente("canal de venda", 0, 20, False, Evidencia.NAO_VERIFICADO, "classificação da loja não registrada" + extra))
 
     # 5) reputação independente (30)
-    if loja and loja.reputacao_nota is not None and loja.reputacao_fonte:
-        pts = loja.reputacao_nota / loja.reputacao_escala * 30
+    if loja and loja.reputacao_nota is not None and loja.reputacao_escala and loja.reputacao_escala > 0 and loja.reputacao_fonte:
+        pts_rep = min(max(loja.reputacao_nota, 0.0), loja.reputacao_escala) / loja.reputacao_escala * 30
         nota = f"nota {loja.reputacao_nota:g}/{loja.reputacao_escala:g} em {loja.reputacao_data}"
         try:
-            if agora.date() - datetime.fromisoformat(loja.reputacao_data).date() > timedelta(days=365):
-                pts *= 0.5
+            if agora.date() - datetime.fromisoformat(str(loja.reputacao_data)).date() > timedelta(days=365):
+                pts_rep *= 0.5
                 nota += " (dado com mais de 12 meses: pontuação reduzida à metade)"
-        except (TypeError, ValueError):
-            pass
-        comps.append(Componente("reputação independente", round(pts, 1), 30, True, Evidencia.CONFIRMADO_INDEPENDENTE, nota, loja.reputacao_fonte))
+        except ValueError:
+            nota += " (data ilegível: tratada sem desconto por antiguidade)"
+        comps.append(Componente("reputação independente", round(pts_rep, 1), 30, True, Evidencia.CONFIRMADO_INDEPENDENTE, nota, loja.reputacao_fonte))
     else:
         comps.append(Componente("reputação independente", 0, 30, False, Evidencia.NAO_VERIFICADO, "nenhuma fonte independente de reputação registrada"))
 
@@ -149,18 +149,18 @@ def avaliar_confiabilidade(o: Oferta, loja: Loja | None, agora: datetime | None 
 # ------------------------------------------------------------------ sinais de preço entre ofertas
 def sinais_de_preco(ofertas: list[Oferta]) -> dict[str, list[str]]:
     """Compara com a mediana das ofertas verificadas e compatíveis. Exige ≥3 domínios distintos para opinar."""
-    ref = [o for o in ofertas if o.status == Status.VERIFICADA and o.preco_exibido and o.identidade_produto != "divergente"]
-    if len({o.dominio for o in ref}) < 3:
+    ref = [(o, o.preco_ref) for o in ofertas if o.status == Status.VERIFICADA and o.preco_ref and o.identidade_produto != "divergente"]
+    if len({o.dominio for o, _ in ref}) < 3:
         return {}
-    mediana = statistics.median(o.preco_exibido for o in ref)
+    mediana = statistics.median(preco for _, preco in ref)
     out: dict[str, list[str]] = {}
-    for o in ref:
-        ratio = o.preco_exibido / mediana
+    for o, preco in ref:
+        ratio = preco / mediana
         if ratio < Decimal("0.5"):
             out.setdefault(o.url, []).append(f"[ALTO] preço {int((1 - ratio) * 100)}% abaixo da mediana das ofertas verificadas: possível golpe, anúncio enganoso ou produto diferente")
         elif ratio > 2:
             out.setdefault(o.url, []).append(f"[INFO] preço {ratio:.1f}× a mediana das ofertas verificadas")
-    mx, mn = max(o.preco_exibido for o in ref), min(o.preco_exibido for o in ref)
+    mx, mn = max(p for _, p in ref), min(p for _, p in ref)
     if mn and mx / mn > Decimal("1.8"):
         out.setdefault("*", []).append(f"[INFO] dispersão alta entre ofertas verificadas (de {mn} a {mx}): confira variações de modelo, condição ou origem")
     return out
@@ -196,6 +196,13 @@ class Pontuacao:
     sinais: list[str] = field(default_factory=list)     # riscos e avisos (loja + preço + oferta)
 
 
+def custo_de(p: Pontuacao) -> Custo:
+    """Custo de uma pontuação elegível. Elegível implica custo calculável; se isso for violado, falha alto e claro."""
+    if p.custo is None:
+        raise RuntimeError(f"invariante violada: oferta sem custo calculável ({p.oferta.url})")
+    return p.custo
+
+
 def _nota_pagamento(o: Oferta, c: Consulta, modo: str, custos: dict[str, Custo]) -> tuple[float | None, Evidencia, str]:
     if modo == "vista":
         cart, pix = custos.get("cartao_vista"), custos.get("pix")
@@ -205,24 +212,26 @@ def _nota_pagamento(o: Oferta, c: Consulta, modo: str, custos: dict[str, Custo])
             desc = float((cart.produto - pix.produto) / cart.produto * 100)
             return round(70 + min(30.0, max(desc, 0) * 3), 1), pix.evidencia, f"Pix com {desc:.1f}% de desconto sobre o cartão"
         unico = pix or cart
+        if unico is None:
+            return None, Evidencia.NAO_VERIFICADO, "sem preço à vista legível"
         return 70.0, unico.evidencia, "apenas um preço à vista encontrado"
     p = custos.get("parcelado")
     if p is None:
         return None, Evidencia.NAO_VERIFICADO, "parcelamento não encontrado"
-    pedido = c.parcelas
+    pedido, n = c.parcelas, p.n or 0
     if p.sem_juros:
-        if pedido and p.n < pedido:
-            return round(60 + 40 * p.n / pedido, 1), p.evidencia, f"sem juros, mas só em {p.n}x (pedido: {pedido}x)"
-        return 100.0, p.evidencia, f"{p.n}x sem juros"
+        if pedido and n < pedido:
+            return round(60 + 40 * n / pedido, 1), p.evidencia, f"sem juros, mas só em {n}x (pedido: {pedido}x)"
+        return 100.0, p.evidencia, f"{n}x sem juros"
     base = o.preco_cartao_vista or o.preco_exibido
-    pct = float(p.juros_total / base * 100) if base else 100.0
-    return round(max(0.0, 100 - 2 * pct), 1), p.evidencia, f"{p.n}x com juros embutidos de {pct:.1f}% (~{p.taxa_am}% a.m.)"
+    pct = float((p.juros_total or Decimal(0)) / base * 100) if base else 100.0
+    return round(max(0.0, 100 - 2 * pct), 1), p.evidencia, f"{n}x com juros embutidos de {pct:.1f}% (~{p.taxa_am}% a.m.)"
 
 
 def _nota_entrega(o: Oferta, custos: dict[str, Custo]) -> tuple[float | None, Evidencia, str]:
     if o.frete_valor is None:
         return None, Evidencia.NAO_VERIFICADO, "frete não calculado (informe o CEP e confirme no carrinho)"
-    base = o.preco_exibido or Decimal("0")
+    base = o.preco_ref or Decimal("0")
     if o.frete_valor == 0:
         return 100.0, o.evid("frete_valor"), "frete grátis"
     pct = float(o.frete_valor / base * 100) if base else 100.0

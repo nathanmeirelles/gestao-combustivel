@@ -14,8 +14,8 @@ def _carregar_dotenv(caminho: Path) -> None:
     """Lê KEY=VALUE de um .env local sem sobrescrever o que já está no ambiente."""
     if not caminho.is_file():
         return
-    for linha in caminho.read_text(encoding="utf-8").splitlines():
-        linha = linha.strip()
+    for bruta in caminho.read_text(encoding="utf-8").splitlines():
+        linha = bruta.strip()
         if not linha or linha.startswith("#") or "=" not in linha:
             continue
         k, _, v = linha.partition("=")
@@ -45,6 +45,12 @@ class Config:
     google_key: str | None = field(default=None, repr=False)
     google_cx: str | None = field(default=None, repr=False)
     chromium_path: str | None = None     # executável do Chromium, se o Playwright não achar o seu
+    ntfy_topic: str | None = field(default=None, repr=False)     # o nome do tópico funciona como senha: use um aleatório e longo
+    ntfy_server: str = "https://ntfy.sh"
+    ntfy_token: str | None = field(default=None, repr=False)
+    webhook_url: str | None = field(default=None, repr=False)
+    telegram_token: str | None = field(default=None, repr=False)
+    telegram_chat: str | None = field(default=None, repr=False)
 
     @property
     def db_path(self) -> Path:
@@ -55,7 +61,7 @@ class Config:
         return self.data_dir / "cache"
 
     @classmethod
-    def from_env(cls, carregar_dotenv: bool = True) -> "Config":
+    def from_env(cls, carregar_dotenv: bool = True) -> Config:
         if carregar_dotenv:
             _carregar_dotenv(RAIZ / ".env")
         data_dir = Path(os.environ.get("PRECOS_DATA_DIR") or RAIZ / "data")
@@ -68,4 +74,10 @@ class Config:
             google_key=os.environ.get("GOOGLE_CSE_KEY") or None,
             google_cx=os.environ.get("GOOGLE_CSE_CX") or None,
             chromium_path=os.environ.get("PRECOS_CHROMIUM_PATH") or None,
+            ntfy_topic=os.environ.get("NTFY_TOPIC") or None,
+            ntfy_server=(os.environ.get("NTFY_SERVER") or "https://ntfy.sh").rstrip("/"),
+            ntfy_token=os.environ.get("NTFY_TOKEN") or None,
+            webhook_url=os.environ.get("ALERT_WEBHOOK_URL") or None,
+            telegram_token=os.environ.get("TELEGRAM_BOT_TOKEN") or None,
+            telegram_chat=os.environ.get("TELEGRAM_CHAT_ID") or None,
         )

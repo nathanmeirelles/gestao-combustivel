@@ -12,7 +12,9 @@ o que não foi verificado**. Ela **não compra nada**.
 
 ## Estado real (o que foi e o que não foi validado)
 
-Validado em 24/10/2026 (ambiente de nuvem do Claude Code, Python 3.13): **181 testes automatizados passando** e uma pesquisa real (Line 6 HX Stomp) — ver [`docs/TESTE-REAL-2026-10-24.md`](docs/TESTE-REAL-2026-10-24.md).
+Validado entre 24 e 29/10/2026 (ambiente de nuvem do Claude Code, Python 3.13): **328 testes automatizados passando**, cobertura de **97%** (linhas e ramos), `mypy` e `ruff` sem achados, **22 bugs injetados de propósito e todos detectados** (`scripts/mutacao.py`), uma pesquisa real (Line 6 HX Stomp) e uma bateria em **19 páginas reais de 18 lojas** — ver [`docs/TESTE-REAL-2026-10-24.md`](docs/TESTE-REAL-2026-10-24.md).
+
+**Isso não é garantia de “zero erros”** — nenhum software dá essa garantia. É a evidência mensurável do que foi coberto; as limitações abaixo continuam valendo.
 
 | Capacidade | Situação |
 |---|---|
@@ -21,10 +23,11 @@ Validado em 24/10/2026 (ambiente de nuvem do Claude Code, Python 3.13): **181 te
 | Renderização com Chromium (preço via JavaScript) | **Testado** numa página local com JS e em `example.com` (venv com Playwright 1.64.1) — opcional |
 | Cálculo de totais, juros implícitos, pontuação, relatório A–F | **Testado** (unidade + ponta a ponta com páginas simuladas) |
 | Descoberta via Brave/Google CSE | **Só com respostas simuladas** — nenhuma chave disponível para testar ao vivo |
-| Monitoramento (`monitor check`) | **Testado com leitura simulada**; **não há agendador nem notificação** |
+| Monitoramento (`monitor check`), avisos (ntfy / Telegram / webhook) e `scripts/monitor.sh` | **Testados com leitura/envio simulados** (e o script, de verdade, com trava e log). **Nenhum aviso real foi enviado** — faça um teste com `--alvo` alto. O agendamento é seu (cron/systemd): ver [`docs/AGENDAMENTO.md`](docs/AGENDAMENTO.md) |
 | Frete / prazo | **Não automatizado** (sem API); entra via `anotar` quando você lê no carrinho |
 | Histórico de preços de terceiros | **Indisponível** (Wayback e API de comparadores são bloqueados aqui); o histórico é o que o próprio agente coletou |
-| Mercado Livre, Magalu, Casas Bahia, Americanas, Amazon, Reclame Aqui | **Recusam automação** (403/captcha/sem preço estruturado). O agente **não contorna**; a conferência é manual |
+| Mercado Livre, Magalu, Casas Bahia, Americanas, Amazon, Reclame Aqui, Tango Music, Made in Brazil, Harman | **Recusam automação** (403/captcha/sem preço estruturado). O agente **não contorna**; você lê no navegador e registra com `anotar --preco` |
+| Páginas que não publicam preço estruturado (ex.: Serenata, Joinville Games) | Ficam **não verificadas**, mesmo com `--renderizar` (testado). O agente não adivinha preço a partir de texto solto |
 
 ## Instalação
 
@@ -43,7 +46,8 @@ Chaves de busca (opcionais): copie `.env.example` para `.env` (ignorado pelo git
 python -m precos nova "Line 6 HX Stomp" --modelo "line 6 hx stomp" --condicao novo --parcelas 12   # sem CEP: frete não é calculado
 python -m precos candidato "https://loja.com.br/hx-stomp" --titulo "Line 6 HX Stomp"               # visto numa busca: NÃO confirmado
 python -m precos verificar "https://loja.com.br/hx-stomp"                                          # abre a página e lê o preço na fonte
-python -m precos anotar 4 --fonte "carrinho 24/10 14:02, CEP 01001-000" --frete 49,90              # dado lido por você, com fonte
+python -m precos anotar 4 --fonte "navegador 29/10 10:12" --preco 4.299 --titulo "Line 6 HX Stomp" --disponibilidade em_estoque   # loja que bloqueia o robô: você leu, o agente registra
+python -m precos anotar 4 --fonte "carrinho 29/10 14:02, CEP 01001-000" --frete 49,90                # frete/Pix/parcelas lidos por você
 python -m precos loja loja.com.br --tier autorizado --fonte https://marca.com/revendedores         # classificação exige URL
 python -m precos comparar                                                                          # ranking no terminal
 python -m precos relatorio --saida relatorio.md                                                    # formato A–F
@@ -57,11 +61,11 @@ Sem `-c`, os comandos usam a **última** consulta.
 | `candidato` | Registra URL/preço vistos em busca como **não confirmados** |
 | `descobrir` | Busca via API oficial (exige chave); `--registrar` salva como candidatos |
 | `verificar [--fresco] [--renderizar]` | Lê a página da oferta (robots, ritmo, cache) |
-| `anotar` | Registra frete/Pix/parcelas/garantia/vendedor lidos manualmente — `--fonte` obrigatório |
+| `anotar` | Registra o que **você** leu: `--preco` (promove oferta bloqueada a verificada-manual e refaz a checagem do modelo), `--titulo`, `--condicao`, `--disponibilidade`, `--frete`, `--pix`, `--parcela`, `--garantia`, `--vendedor` — `--fonte` obrigatório |
 | `loja` | Registra fatos sobre a loja; tier/reputação/políticas **exigem URL de fonte** |
 | `cnpj`, `cep` | Consultas avulsas (Receita via BrasilAPI, ViaCEP) |
 | `comparar`, `relatorio` | Ranking e relatório completo |
-| `monitor add\|list\|check\|remove` | Preço-alvo (ver Monitoramento) |
+| `monitor add\|list\|check\|remove` | Preço-alvo; `check --notificar` envia o aviso (ver Monitoramento) |
 
 ## Como o agente decide
 
@@ -96,14 +100,16 @@ não verificado · divergente.
 
 ## Monitoramento
 `monitor add --alvo 3.500 --intervalo-h 24 --ate 2026-12-31 [--lojas a.com.br,b.com.br] [--conf-min média]` salva a regra.
-`monitor check` reverifica as URLs da consulta, compara o **menor preço elegível** ao alvo e **imprime** `ALERTA`.
-**Nada disso roda sozinho e não há canal de notificação.** Para monitorar de verdade você precisa de:
-1. um agendador numa máquina **que mantenha `data/precos.db`**: ex. cron `0 */6 * * * cd /caminho/agente-precos && python3 -m precos monitor check >> data/monitor.log 2>&1`;
-2. algo que entregue o alerta (e-mail do cron, um script que leia `ALERTA` do log e chame seu serviço de push/Telegram etc.).
-Em sessões na nuvem o container é efêmero (o banco some); GitHub Actions também não preserva `data/` sem configuração extra. Tarefas agendadas do Claude Code só devem ser criadas a seu pedido.
+`monitor check` reverifica as URLs da consulta (**sem insistir** em sites que bloquearam ou não mostram preço), compara o **menor preço elegível** ao alvo e imprime `ALERTA`.
+Com `--notificar` e um canal configurado (**ntfy**, **Telegram** ou **webhook** — variáveis no `.env.example`), envia o aviso **uma vez por preço** (e tenta de novo se o envio falhar).
+`scripts/monitor.sh` empacota isso para o agendador: log em `data/monitor.log`, trava contra execuções sobrepostas e rotação do log.
+**O agendamento continua sendo seu**: cron/systemd numa máquina que fique ligada e mantenha `data/precos.db` — passo a passo em [`docs/AGENDAMENTO.md`](docs/AGENDAMENTO.md).
+Sessões na nuvem têm container efêmero (o banco some) e GitHub Actions não preserva `data/` sem configuração extra. Tarefas agendadas do Claude Code só devem ser criadas a seu pedido.
 
 ## Manutenção
-- **Testes**: `python -m unittest discover -s tests -t .` (use `-W error::ResourceWarning` para pegar vazamentos). Todo bug achado em site real ganha teste de regressão (ver `RegressoesReaisTest`).
+- **Testes**: `python -m unittest discover -s tests -t .` (use `-W error::ResourceWarning` para pegar vazamentos). Todo bug achado em site real ganha teste de regressão (`RegressoesReaisTest`, `tests/test_extract_real.py`).
+- **Teste de mutação**: `python3 scripts/mutacao.py` injeta 22 bugs deliberados (um por vez, restaurando o arquivo) e exige que a suíte falhe em todos. Se aparecer “ESCAPOU”, falta teste; “NÃO APLICÁVEL” = o código mudou, atualize o mutante.
+- **Análise estática**: `ruff check precos tests` e `mypy precos --ignore-missing-imports` (ambos limpos hoje).
 - **Novos sites**: não escreva parser por loja. O extrator lê JSON-LD → meta → texto visível. Se uma loja não expõe preço estruturado, ela fica "não verificada" (ou use `--renderizar`). Não adicione parser para sites cujos termos vedem coleta automatizada.
 - **Banco e cache**: `data/precos.db` (SQLite) e `data/cache/`. Apagar `data/` zera tudo; o cache expira em 30 min e o `robots.txt` em 24 h.
 - **Cadastro de lojas** (CNPJ/domínio) é reconsultado após 30 dias. Marketplaces conhecidos ficam em `seller.py` (`MARKETPLACES`).
@@ -111,8 +117,10 @@ Em sessões na nuvem o container é efêmero (o banco some); GitHub Actions tamb
 - **Heurísticas a revisar com o tempo**: pesos/rubricas (`scoring.py`), palavras de condição/variante (`matching.py`), padrões de Pix/parcela (`extract.py`).
 
 ## Limitações conhecidas
-- Pix/parcelas lidos do **texto** da página são "estimado" até serem confirmados no checkout (`anotar`).
+- Pix/parcelas lidos do **texto** da página são "estimado" até serem confirmados no checkout (`anotar`). A leitura é **ancorada no preço principal** (janela de ±400 caracteres, exclui revenda/atacado por quantidade, escolhe o candidato mais próximo); em layouts muito compactos um item relacionado colado ao principal ainda pode ser confundido — por isso nunca vira “confirmado” sozinho.
+- Se o preço estruturado da página for, na verdade, o do **Pix** (acontece), o agente detecta, marca o meio e tenta achar o preço de lista (no texto ou derivado das parcelas sem juros — marcado como estimado).
 - A checagem de produto é por título/URL/GTIN: ajuda, mas **não é prova**; GTIN igual em ≥ 2 lojas eleva para "confirmado por fonte independente".
+- O bloqueio a hosts internos não resolve DNS: um nome público que aponte para IP privado não seria detectado (literais, `localhost` e redirecionamentos são checados em todos os saltos, inclusive no Chromium).
 - O vínculo entre um CNPJ citado no rodapé e o dono do site é inferido por semelhança de nome (estimado).
 - Sem cashback/cupom: nenhum é verificado nem somado.
 - Dados de busca (WebSearch) são restritos aos EUA como região, mas com `allowed_domains` retornam fichas brasileiras; os preços nesses resumos são **sempre não confirmados**.

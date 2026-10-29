@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal as D
 
 from precos.models import Consulta, Evidencia, Oferta, Parcelamento, Status
