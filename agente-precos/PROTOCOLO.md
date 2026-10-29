@@ -26,7 +26,7 @@ faz o trabalho determinístico (ler páginas, calcular, pontuar, registrar, gera
 ```
 python -m precos nova "Line 6 HX Stomp" --modelo "line 6 hx stomp" --condicao novo --parcelas 12 [--cep ...] [--excluir "xl"] [--sem-marketplace] [--prioridade preco|parcelamento|oficial|entrega|garantia|seguranca]
 ```
-`--modelo` define os termos que o título **precisa** conter; variantes (XL, Pro, Plus...) e itens usados/semi-novos são marcados como *divergentes* e saem da recomendação.
+`--modelo` define os termos que o título **precisa** conter — **todos**: faltar um termo do meio ou do fim (ex.: “HX **Effects**” ou “Pod Go” no lugar de “HX Stomp”) torna o anúncio *divergente*; faltar só a **marca** (“Line 6”) com o resto do modelo em sequência deixa *incerto* e pede conferência. Por isso, ponha em `--modelo` apenas o que todo anúncio correto contém. Variantes (XL, Pro, Plus...) e itens usados/semi-novos são *divergentes* e saem da recomendação.
 
 **2. Descobrir candidatos** (sem tratar nada como validado):
 - Com chave configurada: `python -m precos descobrir "..." --dominios a.com.br,b.com.br --registrar`.

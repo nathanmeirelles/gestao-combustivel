@@ -12,7 +12,7 @@ o que não foi verificado**. Ela **não compra nada**.
 
 ## Estado real (o que foi e o que não foi validado)
 
-Validado entre 24 e 29/10/2026 (ambiente de nuvem do Claude Code, Python 3.13): **328 testes automatizados passando**, cobertura de **97%** (linhas e ramos), `mypy` e `ruff` sem achados, **22 bugs injetados de propósito e todos detectados** (`scripts/mutacao.py`), uma pesquisa real (Line 6 HX Stomp) e uma bateria em **19 páginas reais de 18 lojas** — ver [`docs/TESTE-REAL-2026-10-24.md`](docs/TESTE-REAL-2026-10-24.md).
+Validado entre 24 e 29/10/2026 (ambiente de nuvem do Claude Code, Python 3.13): **333 testes automatizados passando**, cobertura de **97%** (linhas e ramos), `mypy` e `ruff` sem achados, **24 bugs injetados de propósito e todos detectados** (`scripts/mutacao.py`), uma pesquisa real (Line 6 HX Stomp) e uma bateria em **19 páginas reais de 18 lojas** — ver [`docs/TESTE-REAL-2026-10-24.md`](docs/TESTE-REAL-2026-10-24.md).
 
 **Isso não é garantia de “zero erros”** — nenhum software dá essa garantia. É a evidência mensurável do que foi coberto; as limitações abaixo continuam valendo.
 
@@ -108,7 +108,7 @@ Sessões na nuvem têm container efêmero (o banco some) e GitHub Actions não p
 
 ## Manutenção
 - **Testes**: `python -m unittest discover -s tests -t .` (use `-W error::ResourceWarning` para pegar vazamentos). Todo bug achado em site real ganha teste de regressão (`RegressoesReaisTest`, `tests/test_extract_real.py`).
-- **Teste de mutação**: `python3 scripts/mutacao.py` injeta 22 bugs deliberados (um por vez, restaurando o arquivo) e exige que a suíte falhe em todos. Se aparecer “ESCAPOU”, falta teste; “NÃO APLICÁVEL” = o código mudou, atualize o mutante.
+- **Teste de mutação**: `python3 scripts/mutacao.py` injeta 24 bugs deliberados (um por vez, restaurando o arquivo) e exige que a suíte falhe em todos. Se aparecer “ESCAPOU”, falta teste; “NÃO APLICÁVEL” = o código mudou, atualize o mutante.
 - **Análise estática**: `ruff check precos tests` e `mypy precos --ignore-missing-imports` (ambos limpos hoje).
 - **Novos sites**: não escreva parser por loja. O extrator lê JSON-LD → meta → texto visível. Se uma loja não expõe preço estruturado, ela fica "não verificada" (ou use `--renderizar`). Não adicione parser para sites cujos termos vedem coleta automatizada.
 - **Banco e cache**: `data/precos.db` (SQLite) e `data/cache/`. Apagar `data/` zera tudo; o cache expira em 30 min e o `robots.txt` em 24 h.

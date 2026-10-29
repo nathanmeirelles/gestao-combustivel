@@ -39,6 +39,11 @@ def _sinal_novo(tt: list[str]) -> list[str]:
     return achados
 
 
+def _em_sequencia(sub_lista: list[str], lista: list[str]) -> bool:
+    n = len(sub_lista)
+    return any(lista[i:i + n] == sub_lista for i in range(len(lista) - n + 1))
+
+
 def _tokens_url(url: str | None) -> list[str]:
     from urllib.parse import urlsplit
     return tokens(urlsplit(url).path) if url else []
@@ -68,7 +73,7 @@ def avaliar_identidade(titulo: str | None, c: Consulta, oferta: Oferta | None = 
             motivos.append(f"contém termo excluído pelo usuário: '{t}'")
 
     consulta_toks = set(tokens(c.texto)) | set(exigidos)
-    if exigidos and not faltando:
+    if exigidos and exigidos[-1] in tt:      # vale mesmo com a marca omitida: 'HX Stomp XL' continua sendo outro produto
         ultimo = exigidos[-1]
         pos = max(i for i, t in enumerate(tt) if t == ultimo)
         seguinte = tt[pos + 1] if pos + 1 < len(tt) else None
@@ -98,8 +103,15 @@ def avaliar_identidade(titulo: str | None, c: Consulta, oferta: Oferta | None = 
     if motivos:
         return "divergente", motivos
     if exigidos and faltando:
-        frac = len(faltando) / len(exigidos)
         m = f"título não contém: {', '.join(faltando)}"
+        if c.modelo:
+            # modelo EXPLÍCITO: faltar termo do meio/fim é outro produto (ex.: 'HX Effects' x 'HX Stomp'); faltar só a marca
+            # (prefixo) com o restante do modelo em sequência é incerto (lojas costumam omitir a marca) e pede conferência.
+            k = len(faltando)
+            if exigidos[:k] == faltando and len(exigidos) - k >= 2 and _em_sequencia(exigidos[k:], tt):
+                return "incerto", [f"título não cita '{' '.join(faltando)}' (marca/linha), mas traz '{' '.join(exigidos[k:])}': confira o fabricante"]
+            return "divergente", [m + " — modelo explícito exige todos os termos"]
+        frac = len(faltando) / len(exigidos)
         return ("divergente" if frac > 0.4 else "incerto"), [m]
     avisos: list[str] = []
     if set(tt) & _COMBO:

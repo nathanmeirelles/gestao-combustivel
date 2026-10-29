@@ -31,6 +31,8 @@ MUT = [
  ("extract: parcela sem juros não precisa fechar", "precos/extract.py", "            if abs(total - base) > max(Decimal(\"1.00\"), base * Decimal(\"0.01\")):\n                continue", "            pass"),
  ("extract: atacado deixa de ser excluído",    "precos/extract.py", '_RE_EXCLUI_ANTES = re.compile(r"revendedor|revenda", re.I)', '_RE_EXCLUI_ANTES = re.compile(r"NUNCA_CASA_XYZ", re.I)'),
  ("pipeline: sem cache negativo (martela o RDAP)", "precos/pipeline.py", "        return agora_brt() - datetime.fromisoformat(iso) < janela", "        return False"),
+ ("matching: modelo explícito vira frouxo (HX Effects passa)", "precos/matching.py", '            return "divergente", [m + " — modelo explícito exige todos os termos"]', '            return "incerto", [m]'),
+ ("matching: variante só vale sem marca omitida", "precos/matching.py", "    if exigidos and exigidos[-1] in tt:", "    if exigidos and not faltando:"),
  ("cli: anotar não refaz identidade",          "precos/cli.py",     '    if any(m in mudou for m in ("preço", "título", "condição")):', '    if False:'),
 ]
 falhou_ao_testar = 0

@@ -70,12 +70,13 @@ A bateria rodou em 4 rodadas (antes e depois de cada correção; uma requisiçã
 10. **O `anotar` não conseguia registrar o preço base**, então o fluxo “você lê no navegador e eu registro” para lojas bloqueadas não funcionava. Agora `anotar --preco` promove a oferta e **refaz a checagem do modelo**.
 11. Falhas de rede sem causa (“robots.txt indisponível”): agora dizem se foi certificado/TLS, tempo esgotado, proxy do ambiente ou conexão.
 12. **Sem cache negativo**: com o RDAP do Registro.br limitando taxa (403 persistente observado em 29/10), cada `comparar` repetiria a consulta por loja (~12 s cada) e reforçaria o bloqueio. Agora uma consulta que falhou só é repetida depois de 6 h.
-13. Cadastro de loja editado à mão (tier inválido, escala de nota ausente) derrubaria a pontuação; limite de 3 MB passou a truncar de verdade; `lastrowid` do banco é checado.
+13. **Produtos irmãos passavam como o modelo pedido**: com `--modelo` explícito, “HX Effects” (sem “stomp”) era só *incerto* e continuava elegível; já “HX Stomp” sem a marca era excluído por engano. Agora faltar termo do meio/fim é divergente e faltar só a marca é incerto — e a regra de variante (“XL”) passou a valer também sem a marca (bug que a tolerância nova abriu e o teste pegou).
+14. Cadastro de loja editado à mão (tier inválido, escala de nota ausente) derrubaria a pontuação; limite de 3 MB passou a truncar de verdade; `lastrowid` do banco é checado.
 
 ## Qualidade medida (29/10/2026)
-- **328 testes**, cobertura **97%** (linhas e ramos) — a CLI, que estava em 64%, foi a 91%.
+- **333 testes**, cobertura **97%** (linhas e ramos) — a CLI, que estava em 64%, foi a 91%.
 - `mypy` (21 arquivos) e `ruff` sem achados.
-- **Teste de mutação**: 22 bugs injetados de propósito nos pontos mais críticos (robots, SSRF, 403, confiabilidade, frete, milhar BR, slug da URL, Pix, parcelas, avisos…) — **todos detectados** (`python3 scripts/mutacao.py`).
+- **Teste de mutação**: 24 bugs injetados de propósito nos pontos mais críticos (robots, SSRF, 403, confiabilidade, frete, milhar BR, slug da URL, Pix, parcelas, avisos…) — **todos detectados** (`python3 scripts/mutacao.py`).
 - O caminho que leva à **confiança “alta”** só era testado nos casos negativos; agora há teste positivo (3 lojas com tudo confirmado).
 
 ## Continua sem teste ao vivo (por falta de chave/credencial, ou por publicar algo)

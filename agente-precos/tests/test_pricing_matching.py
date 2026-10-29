@@ -121,6 +121,30 @@ class IdentidadeTest(unittest.TestCase):
         s, _ = avaliar_identidade("Pedaleira Boss GT-1000 Core", self.C)
         self.assertEqual(s, "divergente")
 
+    def test_modelo_explicito_irmao_da_mesma_linha_diverge(self):
+        """HX Effects e Pod Go são outros produtos da Line 6 (regressão: HX Effects era só 'incerto' e ficava elegível)."""
+        for titulo in ("Pedaleira Multi-efeitos Line 6 HX Effects Guitarra", "Pedaleira Line 6 Multiefeitos Pod Go", "Line 6 Helix LT", "Line 6 HX Stomp Plus"):
+            self.assertEqual(avaliar_identidade(titulo, self.C)[0], "divergente", titulo)
+
+    def test_modelo_explicito_com_marca_omitida_e_incerto_nao_divergente(self):
+        s, m = avaliar_identidade("Pedaleira HX Stomp Modeladora de Amplificadores", self.C)
+        self.assertEqual(s, "incerto")
+        self.assertIn("marca/linha", " ".join(m))
+
+    def test_marca_omitida_nao_escapa_das_outras_regras(self):
+        """Regressão: a tolerância à marca omitida retornava antes de checar variante, acessório e condição."""
+        for titulo in ("Pedaleira HX Stomp XL Modeladora", "Capa para HX Stomp", "Pedaleira HX Stomp usada", "Pedaleira HX Stomp semi-nova"):
+            self.assertEqual(avaliar_identidade(titulo, self.C)[0], "divergente", titulo)
+
+    def test_marca_omitida_mas_so_um_termo_do_modelo_continua_divergente(self):
+        c = Consulta("Boss DS-1", modelo="boss ds 1")
+        self.assertEqual(avaliar_identidade("Pedal DS", c)[0], "divergente")
+        self.assertEqual(avaliar_identidade("Pedal Distortion DS-1 Laranja", c)[0], "incerto")      # 'ds 1' em sequência
+
+    def test_modelo_derivado_do_texto_continua_leniente(self):
+        c = Consulta("Pedaleira Line 6 HX Stomp")                                                    # sem --modelo
+        self.assertEqual(avaliar_identidade("Pedal de efeito Line 6 Helix HX Stomp preto", c)[0], "incerto")   # 'pedaleira' ausente
+
     def test_combo_e_incerto(self):
         s, _ = avaliar_identidade("Kit Line 6 HX Stomp com fonte e bag", self.C)
         self.assertEqual(s, "incerto")
